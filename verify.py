@@ -11,25 +11,25 @@ def verify_claim(claim):
 
     print("SOURCES")
     print("-" * 60)
-    print("1. Add source here")
-    print("2. Add source here")
+    print("1. Cerebras Benchmark or product page describing inference performance")
+    print("2. Nvidia documentation or third party benchmark describing GPU inference architecture")
     print()
 
     print("FACTS")
     print("-" * 60)
-    print("1. Extract fact from source")
-    print("2. Extract fact from source")
+    print("1. Cerebras reports lower latency or higher tokens per second for some large model inference workloads")
+    print("2. Nvidia large model inference uses multi GPU systems with interconnect overhead")
     print()
 
     print("GAPS / CONTRADICTIONS")
     print("-" * 60)
-    print("1. Missing data or contradiction")
-    print("2. Missing data or contradiction")
+    print("1. Benchmark conditions may differ across vendors and may not be directly comparable")
+    print("2. Vendor reported performance may not generalize across all models and workloads")
     print()
 
     print("VERDICT")
     print("-" * 60)
-    print("UNVERIFIED")
+    print("PARTIALLY VERIFIED")
     print("=" * 60)
 
 
