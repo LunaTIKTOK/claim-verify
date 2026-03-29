@@ -689,8 +689,8 @@ def infer_expected_error_cost(
 ) -> str:
     """Infer expected error cost as low/medium/high."""
     if (
-        bullshit_risk == "high"
-        or truth_status == "unknown"
+        bullshit_risk in {"high", "very high"}
+        or truth_status in {"unknown", "structurally_invalid"}
         or decision_risk == "high"
     ):
         return "high"
