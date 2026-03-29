@@ -1,0 +1,95 @@
+[
+  {
+    "claim": "A single new AI model will eliminate all cybersecurity breaches and guaranteed zero downtime across every enterprise network.",
+    "sources": [
+      "Vendor keynote claims",
+      "Press release with no independent benchmark"
+    ],
+    "facts": [
+      "No production system can guarantee absolute zero incidents.",
+      "Security posture depends on people, process, and layered controls."
+    ],
+    "gaps": [
+      "Uses absolute language without falsifiable scope.",
+      "No audited third-party validation across environments."
+    ],
+    "truth_status": "unknown",
+    "next_step": "Rewrite into measurable subclaims and require independent validation before decisions."
+  },
+  {
+    "claim": "By 2028, on-device LLM inference is likely to handle most enterprise assistant queries at lower cost than cloud-only deployments.",
+    "sources": [
+      "Semiconductor efficiency roadmaps",
+      "Enterprise pilot studies on hybrid inference"
+    ],
+    "facts": [
+      "Edge accelerators continue to improve tokens-per-watt.",
+      "Many assistant queries are short and privacy-sensitive, favoring local inference."
+    ],
+    "gaps": [
+      "Costs vary by model size and enterprise governance requirements."
+    ],
+    "claim_type": "forward_looking",
+    "truth_status": "mixed",
+    "evidence_strength": "moderate",
+    "next_step": "Track TCO across matched workloads over the next 4 quarters."
+  },
+  {
+    "claim": "The S&P 500 closed higher on 2025-12-31 than on 2025-01-02.",
+    "sources": [
+      "Official index historical close data"
+    ],
+    "facts": [
+      "Daily closing values for both dates are published by multiple market data providers."
+    ],
+    "gaps": [],
+    "truth_status": "true",
+    "evidence_strength": "strong",
+    "bullshit_risk": "low",
+    "action_status": "safe_to_act",
+    "next_step": "Use verified index values in reporting."
+  },
+  {
+    "claim": "The new retrieval pipeline is cheaper and more accurate, because it uses smaller embeddings, and latency dropped after we changed caching.",
+    "sources": [
+      "Internal benchmark dashboard",
+      "Cloud billing export",
+      "A/B experiment report"
+    ],
+    "facts": [
+      "Average query latency decreased after cache policy update.",
+      "Embedding compute cost dropped after dimensionality reduction."
+    ],
+    "gaps": [
+      "Accuracy gains were not consistent across all benchmark slices.",
+      "Multiple simultaneous changes make attribution difficult."
+    ],
+    "truth_status": "mixed",
+    "next_step": "Decompose and test each causal subclaim independently."
+  },
+  {
+    "claim": "U.S. defense AI infrastructure programs will likely prioritize resilient domestic GPU and secure data-center capacity over the next five years.",
+    "sources": [
+      "DoD strategy and budget documents",
+      "Congressional hearing transcripts",
+      "Defense industrial base assessments"
+    ],
+    "facts": [
+      "Recent policy documents emphasize resilience and supply-chain security.",
+      "Program funding trends indicate sustained investment in secure compute capacity."
+    ],
+    "gaps": [
+      "Procurement outcomes can shift with administration and budget cycles."
+    ],
+    "claim_type": "forward_looking",
+    "truth_status": "mixed",
+    "evidence_strength": "moderate",
+    "next_step": "Monitor FY budget marks and program objective memoranda updates."
+  },
+  {
+    "claim": "Coinbase will dominate agent payments and USDC will become the primary settlement layer for AI agents",
+    "sources": [],
+    "facts": [],
+    "gaps": []
+  }
+]
