@@ -626,6 +626,8 @@ def infer_confidence(
     """Infer confidence-in-classification score in range [0.0, 1.0]."""
     if structural_validity == "invalid":
         return 0.9
+    if truth_status == "unsupported":
+        return 0.6
 
     score = 0.5
 
@@ -639,6 +641,9 @@ def infer_confidence(
 
     if truth_status == "unknown":
         score -= 0.2
+
+    if bullshit_risk == "very_high":
+        score = max(score, 0.8)
 
     return max(0.0, min(1.0, round(score, 2)))
 
@@ -684,8 +689,8 @@ def infer_expected_error_cost(
 ) -> str:
     """Infer expected error cost as low/medium/high."""
     if (
-        bullshit_risk in {"high", "very_high"}
-        or truth_status in {"unknown", "structurally_invalid"}
+        bullshit_risk == "high"
+        or truth_status == "unknown"
         or decision_risk == "high"
     ):
         return "high"
@@ -709,6 +714,9 @@ def infer_token_waste_risk(
     bullshit_risk: str,
 ) -> str:
     """Infer likely token waste from claim quality and structure."""
+    if bullshit_risk == "very_high":
+        return "very_high"
+
     if evidence_strength in {"weak", "none"} and rewrite_required:
         return "high"
 
@@ -1039,6 +1047,19 @@ def verify_claim(claim: str) -> None:
     """Print a basic triage report for a single claim string."""
     report = ClaimReport.from_dict({"claim": claim})
     report.print_report()
+
+
+def evaluate_text(text: str) -> list[dict[str, Any]]:
+    """Evaluate raw text by extracting candidate claims and returning JSON-ready reports."""
+    raw_claims = extract_claims_from_text(text)
+    claims = [ClaimReport.from_dict({"claim": claim}) for claim in raw_claims]
+    return [claim.to_dict() for claim in claims]
+
+
+def evaluate_claim(claim: str) -> dict[str, Any]:
+    """Evaluate one claim string and return a JSON-ready report dictionary."""
+    report = ClaimReport.from_dict({"claim": claim})
+    return report.to_dict()
 
 
 def validate_claim_entry(entry: Any, index: int) -> dict[str, Any]:
