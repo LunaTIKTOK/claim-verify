@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
+from claim_graph import build_claim_graph, decompose_claim
+
 REPORT_WIDTH = 72
 PLACEHOLDER_TEXT = "None provided"
 
@@ -115,6 +117,7 @@ class ClaimReport:
     interpretation: str = ""
     bottom_line: str = ""
     next_step: str = ""
+    claim_graph: Any = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ClaimReport":
@@ -175,6 +178,7 @@ class ClaimReport:
                 interpretation=clean_text(data.get("interpretation"), fallback=""),
                 bottom_line=clean_text(data.get("bottom_line"), fallback=""),
                 next_step=clean_text(data.get("next_step"), fallback=""),
+                claim_graph=data.get("claim_graph"),
             )
 
         verdict = clean_text(data.get("verdict"), fallback="")
@@ -237,6 +241,7 @@ class ClaimReport:
             interpretation=clean_text(data.get("interpretation"), fallback=""),
             bottom_line=clean_text(data.get("bottom_line"), fallback=""),
             next_step=clean_text(data.get("next_step"), fallback=""),
+            claim_graph=data.get("claim_graph"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -295,17 +300,70 @@ class ClaimReport:
             risk_profile=risk_profile,
             structural_validity=structural_validity,
         )
-        assumptions = extract_assumptions(self.analysis_claim)
-        priced_assumptions = [
-            price_assumption_failure(
-                assumption,
-                action_type=self.action_type,
-                toxicity_risk=self.toxicity_risk,
-                reasoning_contamination_risk=self.reasoning_contamination_risk,
-                evidence_strength=self.evidence_strength,
-            )
-            for assumption in assumptions
-        ]
+        claim_graph_payload = None
+        claim_graph_warnings: list[str] = []
+        if self.claim_graph is not None:
+            if isinstance(self.claim_graph, dict):
+                claim_graph_payload = self.claim_graph
+            elif hasattr(self.claim_graph, "to_dict") and callable(getattr(self.claim_graph, "to_dict")):
+                claim_graph_payload = self.claim_graph.to_dict()
+            else:
+                raise TypeError("claim_graph must be a dict or an object implementing to_dict()")
+
+            raw_atomic_claims = claim_graph_payload.get("atomic_claims", [])
+            if not isinstance(raw_atomic_claims, list):
+                claim_graph_warnings.append("claim_graph fallback: atomic_claims must be a list")
+            else:
+                for index, item in enumerate(raw_atomic_claims):
+                    if not isinstance(item, dict):
+                        claim_graph_warnings.append(f"claim_graph fallback: atomic_claims[{index}] must be an object")
+                        break
+                    if "text" not in item:
+                        claim_graph_warnings.append(f"claim_graph fallback: atomic_claims[{index}] missing key(s): text")
+                        break
+
+            raw_assumptions = claim_graph_payload.get("assumptions", [])
+            if not isinstance(raw_assumptions, list):
+                claim_graph_warnings.append("claim_graph fallback: assumptions must be a list")
+            else:
+                required_assumption_keys = {"text", "confidence", "failure_cost", "testability", "action_family"}
+                for index, item in enumerate(raw_assumptions):
+                    if not isinstance(item, dict):
+                        claim_graph_warnings.append(f"claim_graph fallback: assumptions[{index}] must be an object")
+                        break
+                    missing = sorted(required_assumption_keys - set(item.keys()))
+                    if missing:
+                        claim_graph_warnings.append(
+                            f"claim_graph fallback: assumptions[{index}] missing key(s): {', '.join(missing)}"
+                        )
+                        break
+
+            if not claim_graph_warnings:
+                rewritten_claims = [item["text"] for item in claim_graph_payload.get("atomic_claims", [])]
+                assumptions = [item["text"] for item in raw_assumptions]
+                priced_assumptions = [
+                    {
+                        "assumption": item["text"],
+                        "confidence": item["confidence"],
+                        "failure_cost": item["failure_cost"],
+                        "testability": item["testability"],
+                        "action_family": item["action_family"],
+                    }
+                    for item in raw_assumptions
+                ]
+
+        if self.claim_graph is None or claim_graph_warnings:
+            assumptions = extract_assumptions(self.analysis_claim)
+            priced_assumptions = [
+                price_assumption_failure(
+                    assumption,
+                    action_type=self.action_type,
+                    toxicity_risk=self.toxicity_risk,
+                    reasoning_contamination_risk=self.reasoning_contamination_risk,
+                    evidence_strength=self.evidence_strength,
+                )
+                for assumption in assumptions
+            ]
         aggregate_assumption_risk = infer_aggregate_assumption_risk(
             priced_assumptions,
             evidence_strength=self.evidence_strength,
@@ -363,6 +421,7 @@ class ClaimReport:
             total_expected_cost_usd=cost_estimate.total_expected_cost_usd,
         )
 
+        initial_execution_permission = execution_permission
         if structural_validity == "invalid":
             execution_permission = "consult_human"
         elif self.action_type == "irreversible" and aggregate_assumption_risk in {"high", "critical"}:
@@ -389,26 +448,27 @@ class ClaimReport:
                 aggregate_assumption_risk=aggregate_assumption_risk,
             )
 
-        bypass_simulation = simulate_bypass(
-            self,
-            execution_permission=execution_permission,
-            structural_validity=structural_validity,
-            bullshit_risk=bullshit_risk,
-            risk_profile=risk_profile,
-        )
-        cost_estimate = compute_action_cost_estimate(
-            base_tokens=max(1, int(self.base_tokens)),
-            compute_multiplier=bypass_simulation["compute_multiplier"],
-            confidence=confidence,
-            bullshit_risk=bullshit_risk,
-            structural_validity=structural_validity,
-            model_price_per_token=max(0.0, float(self.model_price)),
-        )
-        expected_value = compute_expected_value(
-            expected_benefit=expected_benefit,
-            benefit_confidence=benefit_confidence,
-            total_expected_cost_usd=cost_estimate.total_expected_cost_usd,
-        )
+        if execution_permission != initial_execution_permission:
+            bypass_simulation = simulate_bypass(
+                self,
+                execution_permission=execution_permission,
+                structural_validity=structural_validity,
+                bullshit_risk=bullshit_risk,
+                risk_profile=risk_profile,
+            )
+            cost_estimate = compute_action_cost_estimate(
+                base_tokens=max(1, int(self.base_tokens)),
+                compute_multiplier=bypass_simulation["compute_multiplier"],
+                confidence=confidence,
+                bullshit_risk=bullshit_risk,
+                structural_validity=structural_validity,
+                model_price_per_token=max(0.0, float(self.model_price)),
+            )
+            expected_value = compute_expected_value(
+                expected_benefit=expected_benefit,
+                benefit_confidence=benefit_confidence,
+                total_expected_cost_usd=cost_estimate.total_expected_cost_usd,
+            )
         low_testability_count = sum(1 for item in priced_assumptions if item.get("testability") == "low")
         dominance_family_count = sum(1 for item in priced_assumptions if item.get("action_family") == "dominance")
         majority_low_testability = low_testability_count >= max(1, len(priced_assumptions) // 2 + 1)
@@ -508,6 +568,9 @@ class ClaimReport:
             "bypass_simulation": bypass_simulation,
             "reason": reason,
             "next_step": self.next_step or PLACEHOLDER_TEXT,
+            "claim_graph": claim_graph_payload,
+            "claim_graph_warning": (claim_graph_warnings[0] if claim_graph_warnings else None),
+            "claim_graph_warnings": claim_graph_warnings or None,
         }
 
     def print_report(self) -> None:
@@ -1640,21 +1703,7 @@ def infer_rewrite_required(claim: str) -> bool:
 
 def extract_atomic_claims(claim: str) -> list[str]:
     """Extract cleaned, de-duplicated, meaningful atomic claims."""
-    pieces = re.split(r"\band\b|\bbecause\b|,|;", claim, flags=re.IGNORECASE)
-
-    seen: set[str] = set()
-    atomic: list[str] = []
-    for piece in pieces:
-        cleaned = piece.strip(" .")
-        if len(cleaned) <= 5:
-            continue
-        key = cleaned.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        atomic.append(cleaned)
-
-    return atomic
+    return [item.text for item in decompose_claim(claim)]
 
 
 def extract_claims_from_text(text: str) -> list[str]:
@@ -1778,9 +1827,22 @@ def evaluate_input(
     - agents (structured decision output)
     - humans (interpretable decision layer)
     """
+    language_data = normalize_claim_language(input_text)
+    analysis_claim = language_data["analysis_claim"]
+    claim_type = infer_claim_type(analysis_claim)
+    claim_graph = build_claim_graph(
+        analysis_claim,
+        claim_type=claim_type,
+        infer_action_family_fn=infer_action_family,
+        price_assumption_failure_fn=price_assumption_failure,
+        extract_assumptions_fn=extract_assumptions,
+        action_type=action_type,
+        evidence_strength="none",
+    )
     report = ClaimReport.from_dict(
         {
             "claim": input_text,
+            "claim_type": claim_type,
             "risk_profile": risk_profile,
             "action_type": action_type,
             "expected_benefit": expected_benefit,
@@ -1788,6 +1850,7 @@ def evaluate_input(
             "opportunity_cost_of_inaction": opportunity_cost_of_inaction,
             "base_tokens": base_tokens,
             "model_price": model_price,
+            "claim_graph": claim_graph,
         }
     )
     return report.to_dict()
