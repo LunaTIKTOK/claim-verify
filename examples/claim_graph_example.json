@@ -1,0 +1,104 @@
+{
+  "id": "claim_3e0ed2655e",
+  "original_text": "Coinbase will dominate agent payments and USDC will become the primary settlement layer for AI agents because transaction costs are lower",
+  "normalized_text": "coinbase will dominate agent payments and usdc will become the primary settlement layer for ai agents because transaction costs are lower",
+  "claim_type": "forward_looking",
+  "time_scope": "forward_looking",
+  "entities": [
+    {
+      "name": "Coinbase",
+      "type": "company"
+    },
+    {
+      "name": "USDC",
+      "type": "unknown"
+    },
+    {
+      "name": "AI",
+      "type": "unknown"
+    }
+  ],
+  "atomic_claims": [
+    {
+      "id": "atomic_f8aa77092f",
+      "text": "Coinbase will dominate agent payments",
+      "normalized_text": "coinbase will dominate agent payments",
+      "independently_testable": true
+    },
+    {
+      "id": "atomic_03fedaee45",
+      "text": "USDC will become the primary settlement layer for AI agents",
+      "normalized_text": "usdc will become the primary settlement layer for ai agents",
+      "independently_testable": true
+    },
+    {
+      "id": "atomic_1ac5312b34",
+      "text": "transaction costs are lower",
+      "normalized_text": "transaction costs are lower",
+      "independently_testable": true
+    }
+  ],
+  "assumptions": [
+    {
+      "id": "asm_a84db73c5f",
+      "text": "Relevant actors adopt Coinbase at sufficient scale",
+      "action_family": "dependency",
+      "testability": "low",
+      "confidence": 0.4,
+      "failure_cost": "medium"
+    },
+    {
+      "id": "asm_627faee3b6",
+      "text": "Alternatives do not outperform Coinbase on the relevant dimension",
+      "action_family": "dependency",
+      "testability": "low",
+      "confidence": 0.4,
+      "failure_cost": "medium"
+    },
+    {
+      "id": "asm_15a8ae4112",
+      "text": "Observable metrics would show Coinbase reaching primary agent payments and USDC will become the primary settlement layer for AI agents because transaction costs are lower status",
+      "action_family": "dominance",
+      "testability": "low",
+      "confidence": 0.4,
+      "failure_cost": "high"
+    },
+    {
+      "id": "asm_655d093231",
+      "text": "No binding constraint prevents Coinbase from achieving primary agent payments and USDC will become the primary settlement layer for AI agents because transaction costs are lower status",
+      "action_family": "dominance",
+      "testability": "low",
+      "confidence": 0.4,
+      "failure_cost": "high"
+    }
+  ],
+  "required_evidence": [
+    {
+      "type": "comparison",
+      "description": "Baseline comparison against strongest alternatives",
+      "priority_score": 0.9
+    },
+    {
+      "type": "constraint_check",
+      "description": "Prerequisite and dependency constraint validation",
+      "priority_score": 0.85
+    },
+    {
+      "type": "validation",
+      "description": "Forward-looking checkpoint with explicit timeframe",
+      "priority_score": 0.75
+    }
+  ],
+  "acceptance_criteria": [
+    "Evidence confirms atomic claim: Coinbase will dominate agent payments",
+    "Evidence confirms atomic claim: USDC will become the primary settlement layer for AI agents",
+    "Evidence confirms atomic claim: transaction costs are lower"
+  ],
+  "falsifiers": [
+    "Contradictory evidence falsifies: Coinbase will dominate agent payments",
+    "Contradictory evidence falsifies: USDC will become the primary settlement layer for AI agents",
+    "Contradictory evidence falsifies: transaction costs are lower"
+  ],
+  "confidence": 0.55,
+  "priority": 0.5
+}
