@@ -8,10 +8,12 @@ and risk constraints.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -487,6 +489,11 @@ class ClaimReport:
         penalty_if_wrong = {
             "cost_multiplier": round(calibrated_multiplier, 3),
             "expected_loss": calibrated_expected_loss,
+            "expected_failure_cost_usd": {
+                "low": 0.05,
+                "medium": 0.2,
+                "high": 0.75,
+            }.get(calibrated_expected_loss, 0.2),
             "likely_failure_mode": failure_mode,
         }
         action_mode = execution_permission
@@ -680,17 +687,20 @@ class ActionCostEstimate:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert estimate to JSON-ready dictionary."""
-        return {
+        payload = {
             "base_tokens": self.base_tokens,
             "compute_multiplier": round(self.compute_multiplier, 3),
             "correction_probability": round(self.correction_probability, 3),
             "expected_tokens": self.expected_tokens,
-            "expected_cost_usd": round(self.expected_cost_usd, 6),
+            "expected_compute_cost_usd": round(self.expected_cost_usd, 6),
             "correction_cost_usd": round(self.correction_cost_usd, 6),
-            "total_expected_cost_usd": round(self.total_expected_cost_usd, 6),
+            "expected_total_cost_usd": round(self.total_expected_cost_usd, 6),
             "risk_label": self.risk_label,
             "proceed_recommendation": self.proceed_recommendation,
         }
+        payload["expected_cost_usd"] = payload["expected_compute_cost_usd"]
+        payload["total_expected_cost_usd"] = payload["expected_total_cost_usd"]
+        return payload
 
 
 def infer_action_recommendation(
@@ -1854,6 +1864,235 @@ def evaluate_input(
         }
     )
     return report.to_dict()
+
+
+@dataclass(frozen=True)
+class VerificationResult:
+    """Adapter-friendly verification result for middleware control layers."""
+
+    allowed: bool
+    failed_constraints: list[str]
+    warnings: list[str]
+    report: dict[str, Any]
+    hard_constraints: list[str] = field(default_factory=list)
+    logic_constraints: list[str] = field(default_factory=list)
+    format_constraints: list[str] = field(default_factory=list)
+    guardrail_feedback: dict[str, list[dict[str, str]]] = field(default_factory=dict)
+    decision: str = "ALLOW"
+    action_mode: str = "execute_now"
+    recommended_allocation: float = 0.0
+    penalty_if_wrong: dict[str, Any] = field(default_factory=dict)
+    aggregate_assumption_risk: str = "low"
+    data_required: list[str] = field(default_factory=list)
+    failure_cost_summary: list[str] = field(default_factory=list)
+    cost_estimate: dict[str, Any] = field(default_factory=dict)
+    retry_tax_usd: float = 0.0
+    quarantine_reason: str | None = None
+    audit_event: dict[str, Any] = field(default_factory=dict)
+
+
+def map_execution_permission_to_decision(
+    *,
+    execution_permission: str,
+    warnings: list[str],
+    failed_constraints: list[str],
+    aggregate_assumption_risk: str,
+    penalty_if_wrong: dict[str, Any],
+) -> tuple[str, str | None]:
+    if "SENSITIVE_PROMPT_DISCLOSURE" in failed_constraints:
+        return "QUARANTINE", "Sensitive prompt disclosure attempt detected"
+    if execution_permission == "hard_stop":
+        return "HARD_STOP", "Hard-stop execution permission from verifier"
+    if execution_permission == "consult_human":
+        expected_loss = str(penalty_if_wrong.get("expected_loss", "medium"))
+        if aggregate_assumption_risk in {"high", "critical"} or expected_loss == "high":
+            return "QUARANTINE", "High aggregate assumption risk or expected loss requires quarantine"
+        return "CONSULT_HUMAN", "Human escalation required by policy"
+    if execution_permission == "fetch_data_then_execute":
+        return "FETCH_DATA_THEN_EXECUTE", None
+    if execution_permission == "execute_small":
+        return "EXECUTE_SMALL", None
+    if execution_permission == "execute_with_assumptions":
+        return "EXECUTE_WITH_ASSUMPTIONS", None
+    if warnings:
+        return "ALLOW_WITH_WARNING", None
+    return "ALLOW", None
+
+
+def compute_retry_tax(
+    *,
+    penalty_if_wrong: dict[str, Any],
+    aggregate_assumption_risk: str,
+    token_waste_risk: str,
+    violation_count: int,
+    strict_mode: bool,
+) -> float:
+    base = 1.0
+    loss_weight = {"low": 0.1, "medium": 0.25, "high": 0.5}.get(str(penalty_if_wrong.get("expected_loss", "medium")), 0.25)
+    assumption_weight = {"low": 0.0, "medium": 0.2, "high": 0.5, "critical": 0.8}.get(aggregate_assumption_risk, 0.2)
+    waste_weight = {"low": 0.0, "medium": 0.1, "high": 0.35, "very_high": 0.6}.get(token_waste_risk, 0.1)
+    repetition_weight = min(2.5, 0.35 * max(0, violation_count))
+    strict_multiplier = 1.35 if strict_mode else 1.0
+    multiplier = min(6.0, (base + loss_weight + assumption_weight + waste_weight + repetition_weight) * strict_multiplier)
+    return round(multiplier, 3)
+
+
+def verify_output(proposed_output: Any, context: dict[str, Any] | None = None) -> VerificationResult:
+    """Evaluate proposed output and map report fields into middleware-ready control signals."""
+    payload_context = context or {}
+    report = evaluate_input(
+        str(proposed_output),
+        risk_profile=str(payload_context.get("risk_profile", "balanced")),
+        action_type=str(payload_context.get("action_type", "reversible")),
+        expected_benefit=float(payload_context.get("expected_benefit", 0.0)),
+        benefit_confidence=float(payload_context.get("benefit_confidence", 0.0)),
+        opportunity_cost_of_inaction=float(payload_context.get("opportunity_cost_of_inaction", 0.0)),
+        base_tokens=int(payload_context.get("base_tokens", 4000)),
+        model_price=float(payload_context.get("model_price", 0.000003)),
+    )
+
+    failed_constraints: list[str] = []
+    hard_constraints: list[str] = []
+    logic_constraints: list[str] = []
+    format_constraints: list[str] = []
+    warnings: list[str] = []
+    guardrail_feedback: dict[str, list[dict[str, str]]] = {"hard": [], "logic": [], "format": []}
+
+    def add_violation(category: str, code: str, explanation: str) -> None:
+        failed_constraints.append(code)
+        guardrail_feedback[category].append(
+            {
+                "code": code,
+                "explanation": explanation,
+            }
+        )
+        if category == "hard":
+            hard_constraints.append(code)
+        elif category == "logic":
+            logic_constraints.append(code)
+        elif category == "format":
+            format_constraints.append(code)
+
+    lower_text = str(proposed_output).lower()
+    if "system prompt" in lower_text or "hidden instructions" in lower_text:
+        add_violation(
+            "hard",
+            "SENSITIVE_PROMPT_DISCLOSURE",
+            "Hard constraint violated: output appears to disclose protected system instructions.",
+        )
+
+    if report.get("structural_validity") == "invalid":
+        add_violation(
+            "format",
+            "STRUCTURAL_VALIDITY_INVALID",
+            "Format constraint violated: output is structurally invalid or unparseable.",
+        )
+    if report.get("execution_permission") in {"consult_human", "hard_stop"}:
+        add_violation(
+            "hard",
+            "EXECUTION_PERMISSION_BLOCKED",
+            "Hard constraint violated: policy denies direct execution for this output.",
+        )
+    if report.get("action_status") == "do_not_act":
+        add_violation(
+            "hard",
+            "ACTION_STATUS_BLOCKED",
+            "Hard constraint violated: action status indicates output must not be acted upon.",
+        )
+    if report.get("truth_status") in {"unsupported", "unknown"} and report.get("execution_permission") in {
+        "execute_now",
+        "execute_with_assumptions",
+        "execute_small",
+    }:
+        add_violation(
+            "logic",
+            "LOGIC_INSUFFICIENT_SUPPORT",
+            "Logic constraint violated: claim support is insufficient or unknown and needs rethinking.",
+        )
+    if bool(report.get("rewrite_required")):
+        add_violation(
+            "format",
+            "FORMAT_REWRITE_REQUIRED",
+            "Format constraint violated: output requires rewriting for structural clarity.",
+        )
+
+    for warning in (report.get("claim_graph_warnings") or []):
+        warnings.append(str(warning))
+    if report.get("truth_status") in {"unsupported", "unknown"}:
+        warnings.append("TRUTH_STATUS_UNCERTAIN")
+
+    report["guardrail_violations"] = guardrail_feedback
+    report["guardrail_summary"] = {
+        "hard_count": len(hard_constraints),
+        "logic_count": len(logic_constraints),
+        "format_count": len(format_constraints),
+    }
+    decision, quarantine_reason = map_execution_permission_to_decision(
+        execution_permission=str(report.get("execution_permission", "fetch_data_then_execute")),
+        warnings=warnings,
+        failed_constraints=failed_constraints,
+        aggregate_assumption_risk=str(report.get("aggregate_assumption_risk", "low")),
+        penalty_if_wrong=dict(report.get("penalty_if_wrong") or {}),
+    )
+    retry_tax_usd = compute_retry_tax(
+        penalty_if_wrong=dict(report.get("penalty_if_wrong") or {}),
+        aggregate_assumption_risk=str(report.get("aggregate_assumption_risk", "low")),
+        token_waste_risk=str(report.get("token_waste_risk", "medium")),
+        violation_count=int(payload_context.get("violation_count", 0)),
+        strict_mode=bool(payload_context.get("strict_mode", False)),
+    )
+    expected_total_cost_usd = float((report.get("cost_estimate") or {}).get("expected_total_cost_usd", (report.get("cost_estimate") or {}).get("total_expected_cost_usd", 0.0)))
+    audit_event = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "proposed_output_hash": hashlib.sha256(str(proposed_output).encode("utf-8")).hexdigest(),
+        "decision": decision,
+        "failed_constraints": failed_constraints,
+        "warnings": warnings,
+        "aggregate_assumption_risk": report.get("aggregate_assumption_risk"),
+        "token_waste_risk": report.get("token_waste_risk"),
+        "retry_tax_usd": retry_tax_usd,
+        "estimated_total_cost_usd": expected_total_cost_usd,
+        "output_released": False,
+        "session_reset": False,
+    }
+    report["decision"] = decision
+    report["retry_tax_usd"] = retry_tax_usd
+    report["quarantine_reason"] = quarantine_reason
+    expected_value = float(report.get("expected_value", 0.0))
+    aggregate_assumption_risk = str(report.get("aggregate_assumption_risk", "low"))
+    if decision == "QUARANTINE":
+        routing_recommendation = "quarantine_and_review"
+    elif decision == "FETCH_DATA_THEN_EXECUTE":
+        routing_recommendation = "fetch_data_then_verify"
+    elif decision in {"EXECUTE_SMALL", "EXECUTE_WITH_ASSUMPTIONS"}:
+        routing_recommendation = "execute_small_then_verify"
+    elif expected_value >= 0 and retry_tax_usd <= 1.5 and aggregate_assumption_risk in {"low", "medium"}:
+        routing_recommendation = "verify_then_execute"
+    else:
+        routing_recommendation = "fetch_data_then_verify"
+    report["cost_aware_routing_recommendation"] = routing_recommendation
+
+    return VerificationResult(
+        allowed=decision in {"ALLOW", "ALLOW_WITH_WARNING", "EXECUTE_SMALL", "EXECUTE_WITH_ASSUMPTIONS"},
+        failed_constraints=failed_constraints,
+        warnings=warnings,
+        report=report,
+        hard_constraints=hard_constraints,
+        logic_constraints=logic_constraints,
+        format_constraints=format_constraints,
+        guardrail_feedback=guardrail_feedback,
+        decision=decision,
+        action_mode=str(report.get("action_mode", "fetch_data_then_execute")),
+        recommended_allocation=float(report.get("recommended_allocation", 0.0)),
+        penalty_if_wrong=dict(report.get("penalty_if_wrong") or {}),
+        aggregate_assumption_risk=str(report.get("aggregate_assumption_risk", "low")),
+        data_required=[str(item) for item in (report.get("data_required") or [])],
+        failure_cost_summary=[str(item) for item in (report.get("failure_cost_summary") or [])],
+        cost_estimate=dict(report.get("cost_estimate") or {}),
+        retry_tax_usd=retry_tax_usd,
+        quarantine_reason=quarantine_reason,
+        audit_event=audit_event,
+    )
 
 
 def evaluate_inputs(
