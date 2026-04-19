@@ -1,137 +1,88 @@
 from __future__ import annotations
 
-from typing import Any
+from datetime import datetime, timedelta, timezone
 
-from firewall import (
-    AgentRuntime,
-    ConstraintViolationError,
-    Firewall,
-    InMemoryFinalOutputSink,
-    PreconditionRequiredError,
-    QuarantineRequiredError,
-)
-from verify import VerificationResult
+from authority import build_token, serialize_token
+from gate import blocked_core_access, configure_authority, execute, register_tool
+from mcp_executor import PaymentGate, SecurityViolationError
 
 
-def toy_agent(context: dict[str, Any] | None = None) -> str:
-    mode = (context or {}).get("mode", "allow")
-    return f"proposal:{mode}"
-
-
-def scripted_verifier(proposed_output: Any, context: dict[str, Any] | None = None) -> VerificationResult:
-    mode = (context or {}).get("mode", "allow")
-    base_report = {
-        "token_waste_risk": "medium",
-        "cost_estimate": {"expected_total_cost_usd": 0.12, "expected_compute_cost_usd": 0.12},
-        "penalty_if_wrong": {"expected_loss": "medium", "cost_multiplier": 1.4},
-        "aggregate_assumption_risk": "medium",
+def _ctx(agent_id: str, policy_ids: list[str], token: str | None) -> dict:
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    return {
+        "agent_id": agent_id,
+        "tenant_id": "tenant-demo",
+        "session_id": "sess-demo",
+        "tool_id": "tool.scan",
+        "model_id": "model-demo",
+        "runtime_id": "runtime-demo",
+        "delegated_scope": "tool:scan",
+        "issued_at": now.isoformat(),
+        "expires_at": (now + timedelta(minutes=5)).isoformat(),
+        "nonce": "nonce-demo",
+        "jti": "jti-demo",
+        "retry_count": 0,
+        "policy_ids": policy_ids,
+        "governance_token": token,
     }
-    if mode == "allow":
-        return VerificationResult(
-            allowed=True,
-            failed_constraints=[],
-            warnings=[],
-            report=base_report,
-            decision="ALLOW",
-            action_mode="execute_now",
-            recommended_allocation=0.6,
-            penalty_if_wrong=base_report["penalty_if_wrong"],
-            aggregate_assumption_risk="medium",
-            data_required=[],
-            failure_cost_summary=[],
-            cost_estimate=base_report["cost_estimate"],
-            retry_tax_usd=0.0,
-            quarantine_reason=None,
-            audit_event={},
-        )
-    if mode == "fetch":
-        return VerificationResult(
-            allowed=False,
-            failed_constraints=["FETCH_DATA_REQUIRED"],
-            warnings=["TRUTH_STATUS_UNCERTAIN"],
-            report={**base_report, "token_waste_risk": "high"},
-            decision="FETCH_DATA_THEN_EXECUTE",
-            action_mode="fetch_data_then_execute",
-            recommended_allocation=0.1,
-            penalty_if_wrong={"expected_loss": "high", "cost_multiplier": 2.5},
-            aggregate_assumption_risk="high",
-            data_required=["independent benchmark", "ground-truth source"],
-            failure_cost_summary=["collect evidence before action"],
-            cost_estimate=base_report["cost_estimate"],
-            retry_tax_usd=1.9,
-            quarantine_reason=None,
-            audit_event={},
-        )
-    if mode == "bounded":
-        return VerificationResult(
-            allowed=True,
-            failed_constraints=[],
-            warnings=[],
-            report=base_report,
-            decision="EXECUTE_SMALL",
-            action_mode="execute_small",
-            recommended_allocation=0.25,
-            penalty_if_wrong=base_report["penalty_if_wrong"],
-            aggregate_assumption_risk="medium",
-            data_required=["monitor key metric"],
-            failure_cost_summary=["limit scope and checkpoint"],
-            cost_estimate=base_report["cost_estimate"],
-            retry_tax_usd=0.4,
-            quarantine_reason=None,
-            audit_event={},
-        )
-    if mode == "quarantine":
-        return VerificationResult(
-            allowed=False,
-            failed_constraints=["SENSITIVE_PROMPT_DISCLOSURE"],
-            warnings=[],
-            report={**base_report, "token_waste_risk": "very_high"},
-            decision="QUARANTINE",
-            action_mode="consult_human",
-            recommended_allocation=0.0,
-            penalty_if_wrong={"expected_loss": "high", "cost_multiplier": 4.2},
-            aggregate_assumption_risk="critical",
-            data_required=["human review required"],
-            failure_cost_summary=["quarantine until policy clearance"],
-            cost_estimate=base_report["cost_estimate"],
-            retry_tax_usd=3.2,
-            quarantine_reason="Repeated unsafe disclosure pattern",
-            audit_event={},
-        )
-    return VerificationResult(allowed=True, failed_constraints=[], warnings=[], report=base_report)
 
 
-def build_runtime() -> AgentRuntime:
-    sink = InMemoryFinalOutputSink(emitted=[])
-    firewall = Firewall(sink=sink, verifier=scripted_verifier, strict_mode=False)
-    return AgentRuntime(agent=toy_agent, firewall=firewall, max_violations=3)
+def _build_token(secret: str, agent_id: str, intent: str, tool_name: str, policy_ids: list[str]) -> str:
+    return serialize_token(
+        build_token(
+            agent_id=agent_id,
+            intent=intent,
+            tool_name=tool_name,
+            policy_ids=policy_ids,
+            secret=secret,
+            ttl_seconds=300,
+        )
+    )
 
 
 def main() -> int:
-    runtime = build_runtime()
+    secret = "stage3-demo-secret"
+    agent_id = "agent-demo"
+    intent = "safe_scan"
+    tool_name = "tool.scan"
+    policy_ids = ["policy.constitution.v1", "policy.solvency.v1"]
 
-    print("ALLOW:", runtime.run({"mode": "allow"}))
+    configure_authority(secret=secret, payment_gate=PaymentGate(wallet_balances={agent_id: 50.0}))
+
+    def scan_tool(args: dict) -> dict:
+        return {"ok": True, "echo": args.get("claim", "")}
+
+    register_tool(tool_name, scan_tool)
+
+    good_token = _build_token(secret, agent_id, intent, tool_name, policy_ids)
+    out = execute(intent, _ctx(agent_id, policy_ids, good_token), tool_name, {"claim": "safe claim"})
+    print("AUTHORIZED_EXECUTION:", out["executed"], out["result"])
+
+    forged = good_token[:-1] + ("0" if good_token[-1] != "0" else "1")
+    try:
+        execute(intent, _ctx(agent_id, policy_ids, forged), tool_name, {"claim": "safe claim"})
+    except SecurityViolationError as exc:
+        print("FORGED_TOKEN_BLOCKED:", exc.reason, exc.retry_tax_usd, exc.bond_forfeited_usd)
+
+    replay = _build_token(secret, agent_id, intent, tool_name, policy_ids)
+    execute(intent, _ctx(agent_id, policy_ids, replay), tool_name, {"claim": "safe claim"})
+    try:
+        execute(intent, _ctx(agent_id, policy_ids, replay), tool_name, {"claim": "safe claim"})
+    except SecurityViolationError as exc:
+        print("REPLAY_BLOCKED:", exc.reason, exc.retry_tax_usd, exc.bond_forfeited_usd)
+
+    configure_authority(secret=secret, payment_gate=PaymentGate(wallet_balances={agent_id: 1.0}))
+    register_tool(tool_name, scan_tool)
+    poor_token = _build_token(secret, agent_id, intent, tool_name, policy_ids)
+    try:
+        execute(intent, _ctx(agent_id, policy_ids, poor_token), tool_name, {"claim": "safe claim"})
+    except RuntimeError as exc:
+        print("INSUFFICIENT_BALANCE_LOCKOUT:", str(exc))
 
     try:
-        runtime.run({"mode": "fetch"})
-    except PreconditionRequiredError as exc:
-        print("FETCH_DATA_THEN_EXECUTE:", exc.execution_plan)
-
-    bounded = runtime.run({"mode": "bounded", "allow_bounded_execution": True, "max_allocation": 0.2})
-    print("EXECUTE_SMALL_BOUNDED:", bounded)
-
-    try:
-        runtime.run({"mode": "quarantine"})
-    except QuarantineRequiredError as exc:
-        print("QUARANTINE:", exc.error_code, exc.retry_tax_usd, exc.quarantine_reason)
-
-    for _ in range(2):
-        try:
-            runtime.run({"mode": "fetch"})
-        except PreconditionRequiredError:
-            pass
-    print("RETRY_TAX_MEMORY:", runtime.session_state.cumulative_retry_tax_usd)
-    print("ECONOMIC_SUMMARY:", runtime.economic_summary())
+        blocked_core_access().run("unsafe")
+    except RuntimeError as exc:
+        print("DIRECT_BYPASS_BLOCKED:", str(exc))
 
     return 0
 

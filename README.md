@@ -1,62 +1,59 @@
 # Constraint-Engine
 
-Constraint-Engine is a pre-action decision engine for humans and AI agents.
+Constraint-Engine is a **constitutional authority layer for agent execution**.
 
-It does not determine truth.  
-It determines whether action is justified under uncertainty — and how much to commit.
+The model/runtime is an **untrusted proposer**.
+The authority layer is the **trusted executor**.
 
----
+## Single Public Execution Surface
 
-## Core Idea
+There is exactly one allowed execution path:
 
-Every action is a bet.
+```python
+execute(intent: str, actor_context: dict, tool_name: str, tool_args: dict)
+```
 
-Constraint-Engine evaluates that bet before execution using three forces:
+Any direct core execution path or direct tool invocation path is unauthorized and must fail closed.
 
-- **Expected Value (EV)** → potential upside  
-- **Confidence** → reliability of that upside  
-- **Risk / Toxicity** → cost of being wrong  
+## Governance Authorization Is Mandatory
 
-The output is not binary.
+All downstream tools require valid governance authorization on every call.
+A governance token is required and must be:
 
-It answers:
+- signed (HMAC-SHA256)
+- scoped to agent + intent + tool + policy set
+- time-bounded (`issued_at` / `expires_at`)
+- one-time use
 
-- should action occur  
-- how much to allocate  
-- what the expected cost of error is  
+Unauthorized execution path attempts are **security violations**.
 
----
+## Solvency and Bond Enforcement
 
-## What It Does
+Execution also requires solvency and bond locking:
 
-For any input claim or task, the engine computes:
+- bond lock before execution
+- bond release on valid execution
+- bond forfeiture on invalid/missing/replayed token attempts
 
-- structural validity  
-- truth status (heuristic)  
-- evidence strength  
-- toxicity risk  
-- reasoning contamination risk  
-- expected cost (tokens / USD)  
-- expected benefit  
-- expected value (EV)
+## Replay Token Persistence Strategy
 
-And produces:
+`authority.py` provides a replay-store interface (`UsedTokenStore`) and default
+`InMemoryUsedTokenStore` implementation.
 
-```json
-{
-  "execution_permission": "allow_with_warning",
-  "expected_value": 0.12,
-  "risk_label": "high",
-  "recommended_allocation": 0.25
-}
+- **Current default:** in-memory store (suitable for tests/dev)
+- **Production requirement:** implement `UsedTokenStore` with persistent shared storage
+  (e.g., redis/database/kv) so consumed token ids survive process restarts and scale-out.
 
----
+## Demo
 
-## Why agents use this first
+```bash
+python middleware_example.py
+```
 
-The cognitive firewall improves economics, not just safety:
+Shows:
 
-- It **reduces wasted retries** by forcing uncertain outputs into fetch-data or bounded paths before expensive execution.
-- It **prevents high-cost bad releases** through quarantine/hard-stop decisions when expected failure cost is high.
-- It **routes uncertainty into cheaper workflows** (`fetch_data_then_verify`, `execute_small_then_verify`) instead of full-risk execution.
-- It **improves expected economics** by making retry costs explicit (`retry_tax_usd`) and surfacing developer-facing value metrics (`expected_compute_saved_usd`, `expected_failure_cost_avoided_usd`, `firewall_value_score`).
+- authorized execution
+- forged token blocked
+- replay blocked
+- insufficient balance lockout
+- direct bypass blocked
