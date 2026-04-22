@@ -4,6 +4,7 @@ from typing import Any
 
 from gate import execute as _execute
 from gate import issue_governance_token as _issue_governance_token
+from gate import mint_issuance_ticket
 from intent_classification import classify_intent
 from runtime_governance import RuntimeState, evaluate_runtime_governance
 
@@ -26,7 +27,7 @@ def evaluate_request(
     requested_next_state: RuntimeState,
 ):
     intent_class = classify_intent(tool_name, intent)
-    return evaluate_runtime_governance(
+    decision = evaluate_runtime_governance(
         current_state=current_state,
         requested_next_state=requested_next_state,
         tool_name=tool_name,
@@ -39,22 +40,20 @@ def evaluate_request(
         context=tool_args,
         policy_pack_paths=DEFAULT_POLICY_PACKS,
     )
+    actor_context.pop("governance_issuance_ticket", None)
+    if decision.status != "DENY":
+        actor_context["governance_issuance_ticket"] = mint_issuance_ticket(
+            intent=intent,
+            actor_context=actor_context,
+            tool_name=tool_name,
+            tool_args=tool_args,
+        )
+    return decision
 
 
 def issue_governance_token(intent: str, actor_context: dict, tool_name: str, tool_args: dict) -> str:
-    current_state = RuntimeState[str(actor_context.get("current_state", RuntimeState.RESEARCH.value))]
-    requested_next_state = RuntimeState[str(actor_context.get("requested_next_state", RuntimeState.READ_ONLY.value))]
-    decision = evaluate_request(
-        intent=intent,
-        tool_name=tool_name,
-        actor_context=actor_context,
-        tool_args=tool_args,
-        current_state=current_state,
-        requested_next_state=requested_next_state,
-    )
-    if decision.status == "DENY":
-        reason = decision.correction_requirement.required_action if decision.correction_requirement else "GOVERNANCE_DENY"
-        raise RuntimeError(f"UNAUTHORIZED_EXECUTION: governance denied token issuance ({reason})")
+    if not actor_context.get("governance_issuance_ticket"):
+        raise RuntimeError("UNAUTHORIZED_EXECUTION: evaluate_request must pass before token issuance")
     return _issue_governance_token(intent, actor_context, tool_name, tool_args)
 
 

@@ -174,7 +174,7 @@ class RuntimeGovernanceTests(unittest.TestCase):
         self.assertEqual(d.status, "DENY")
         self.assertEqual(d.correction_requirement.required_action, "REDACT_PII")
 
-    def test_full_governor_flow_integration(self):
+    def test_allowed_flow_executes_once(self):
         actor_context = self._actor_context()
         actor_context["current_state"] = RuntimeState.RESEARCH.value
         actor_context["requested_next_state"] = RuntimeState.READ_ONLY.value
@@ -197,7 +197,7 @@ class RuntimeGovernanceTests(unittest.TestCase):
         self.assertTrue(result["executed"])
         self.assertEqual(self.calls["n"], 1)
 
-    def test_denied_state_transition_cannot_issue_token_and_never_executes(self):
+    def test_denied_cannot_issue_token_or_execute(self):
         actor_context = self._actor_context()
         actor_context["approval_token"] = ""
         actor_context["current_state"] = RuntimeState.TRANSACTION.value
@@ -219,6 +219,15 @@ class RuntimeGovernanceTests(unittest.TestCase):
         with self.assertRaises(SecurityViolationError):
             execute("payment_transfer", actor_context, "tool.scan", tool_args)
         self.assertEqual(self.calls["n"], 0)
+
+    def test_direct_issue_token_bypass(self):
+        actor_context = self._actor_context()
+        actor_context["current_state"] = RuntimeState.RESEARCH.value
+        actor_context["requested_next_state"] = RuntimeState.READ_ONLY.value
+        tool_args = {"claim": "safe claim"}
+
+        with self.assertRaises(RuntimeError):
+            issue_governance_token("query_customer_data", actor_context, "tool.scan", tool_args)
 
 
 if __name__ == "__main__":

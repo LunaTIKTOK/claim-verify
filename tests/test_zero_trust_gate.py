@@ -5,7 +5,7 @@ from pathlib import Path
 
 from audit import ALLOWED_CODES, AuditLogger
 from authority import InMemoryUsedTokenStore, build_token, compute_payload_hash, serialize_token
-from gate import KeyRing, _GlassWingCore, configure_authority, execute, issue_governance_token, register_tool
+from gate import KeyRing, _GlassWingCore, configure_authority, execute, issue_governance_token, mint_issuance_ticket, register_tool
 from mcp_executor import PaymentGate, SecurityViolationError
 
 
@@ -51,10 +51,15 @@ class Stage3GovernanceTests(unittest.TestCase):
             "governance_token": token,
         }
 
+    def _issue_token(self, tool_name: str, payload: dict, ctx: dict | None = None) -> str:
+        context = dict(ctx or self._context(None))
+        context["governance_issuance_ticket"] = mint_issuance_ticket(self.intent, context, tool_name, payload)
+        return issue_governance_token(self.intent, context, tool_name, payload)
+
     def test_valid_signed_token_execution(self):
         payload = {"claim": "System has measurable 99% uptime in 30 days."}
         ctx = self._context(None)
-        token = issue_governance_token(self.intent, ctx, self.tool_name, payload)
+        token = self._issue_token(self.tool_name, payload, ctx)
         out = execute(self.intent, {**ctx, "governance_token": token}, self.tool_name, payload)
         self.assertTrue(out["executed"])
 
@@ -77,7 +82,7 @@ class Stage3GovernanceTests(unittest.TestCase):
     def test_payload_binding_denial(self):
         token_payload = {"claim": "safe"}
         tampered_payload = {"claim": "tampered"}
-        token = issue_governance_token(self.intent, self._context(None), self.tool_name, token_payload)
+        token = self._issue_token(self.tool_name, token_payload)
         with self.assertRaises(SecurityViolationError):
             execute(self.intent, self._context(token), self.tool_name, tampered_payload)
 
@@ -87,7 +92,7 @@ class Stage3GovernanceTests(unittest.TestCase):
 
         register_tool("tool.fail", failing_tool)
         payload = {"claim": "safe"}
-        token = issue_governance_token(self.intent, self._context(None), "tool.fail", payload)
+        token = self._issue_token("tool.fail", payload)
         with self.assertRaises(RuntimeError):
             execute(self.intent, self._context(token), "tool.fail", payload)
         with self.assertRaises(SecurityViolationError):
@@ -95,7 +100,7 @@ class Stage3GovernanceTests(unittest.TestCase):
 
     def test_pending_token_cannot_be_reused_concurrently(self):
         payload = {"claim": "safe"}
-        token = issue_governance_token(self.intent, self._context(None), self.tool_name, payload)
+        token = self._issue_token(self.tool_name, payload)
         from authority import deserialize_token
 
         token_obj = deserialize_token(token)

@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from authority import InMemoryUsedTokenStore, SQLiteUsedTokenStore, build_token, compute_payload_hash, serialize_token
-from gate import KeyRing, _GlassWingCore, configure_authority, execute, issue_governance_token, register_tool
+from gate import KeyRing, _GlassWingCore, configure_authority, execute, issue_governance_token, mint_issuance_ticket, register_tool
 from mcp_executor import PaymentGate, SQLitePaymentGate, SecurityViolationError
 
 
@@ -35,6 +35,11 @@ class UnauthorizedPathAuditTests(unittest.TestCase):
             "policy_ids": self.policy_ids,
             "governance_token": token,
         }
+
+    def _issue_token(self, tool_name: str, payload: dict, ctx: dict | None = None) -> str:
+        context = dict(ctx or self._ctx(None))
+        context["governance_issuance_ticket"] = mint_issuance_ticket(self.intent, context, tool_name, payload)
+        return issue_governance_token(self.intent, context, tool_name, payload)
 
     def test_direct_core_access_fails(self):
         with self.assertRaises(RuntimeError):
@@ -82,7 +87,7 @@ class UnauthorizedPathAuditTests(unittest.TestCase):
         )
         register_tool(self.tool_name, lambda args: {"ok": True, "args": args})
         payload = {"claim": "safe"}
-        token = issue_governance_token(self.intent, self._ctx(None), self.tool_name, payload)
+        token = self._issue_token(self.tool_name, payload)
         forged = token[:-1] + ("0" if token[-1] != "0" else "1")
         with self.assertRaises(SecurityViolationError):
             execute(self.intent, self._ctx(forged), self.tool_name, payload)
@@ -98,7 +103,7 @@ class UnauthorizedPathAuditTests(unittest.TestCase):
             used_token_store=SQLiteUsedTokenStore(db),
         )
         register_tool(self.tool_name, lambda args: {"ok": True, "args": args})
-        token = issue_governance_token(self.intent, self._ctx(None), self.tool_name, payload)
+        token = self._issue_token(self.tool_name, payload)
         execute(self.intent, self._ctx(token), self.tool_name, payload)
 
         configure_authority(
@@ -118,7 +123,7 @@ class UnauthorizedPathAuditTests(unittest.TestCase):
         )
         register_tool(self.tool_name, lambda args: {"ok": True, "args": args})
         payload = {"claim": "safe"}
-        token = issue_governance_token(self.intent, self._ctx(None), "tool.other", payload)
+        token = self._issue_token("tool.other", payload)
         with self.assertRaises(SecurityViolationError):
             execute(self.intent, self._ctx(token), self.tool_name, payload)
 
@@ -129,7 +134,7 @@ class UnauthorizedPathAuditTests(unittest.TestCase):
         )
         register_tool(self.tool_name, lambda args: {"ok": True, "args": args})
         payload = {"claim": "safe"}
-        token = issue_governance_token(self.intent, {**self._ctx(None), "agent_id": "agent-b"}, self.tool_name, payload)
+        token = self._issue_token(self.tool_name, payload, {**self._ctx(None), "agent_id": "agent-b"})
         with self.assertRaises(SecurityViolationError):
             execute(self.intent, self._ctx(token), self.tool_name, payload)
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -65,6 +66,7 @@ class _ConstitutionalAuthority:
         self._reputation_record = ReputationRecord()
         self._core = _GlassWingCore()
         self._tools: dict[str, Callable[[dict[str, Any]], Any]] = {}
+        self._issuance_tickets: dict[str, str] = {}
         self._executor = MCPGovernanceExecutor(
             key_resolver=self._key_ring.resolve,
             tools=self._tools,
@@ -80,6 +82,44 @@ class _ConstitutionalAuthority:
             return tool(args)
 
         self._tools[tool_name] = _guarded_tool
+
+    def _ticket_fingerprint(self, *, intent: str, actor_context: dict[str, Any], tool_name: str, tool_args: dict[str, Any]) -> str:
+        current_state = str(actor_context.get("current_state", RuntimeState.RESEARCH.value))
+        requested_next_state = str(actor_context.get("requested_next_state", RuntimeState.READ_ONLY.value))
+        policy_ids = [str(x) for x in actor_context.get("policy_ids", ["default-policy"])]
+        return "|".join(
+            [
+                str(actor_context.get("agent_id", "")),
+                intent,
+                tool_name,
+                ",".join(policy_ids),
+                current_state,
+                requested_next_state,
+                compute_payload_hash(tool_args),
+            ]
+        )
+
+    def mint_issuance_ticket(self, *, intent: str, actor_context: dict[str, Any], tool_name: str, tool_args: dict[str, Any]) -> str:
+        ticket_id = secrets.token_urlsafe(24)
+        self._issuance_tickets[ticket_id] = self._ticket_fingerprint(
+            intent=intent,
+            actor_context=actor_context,
+            tool_name=tool_name,
+            tool_args=tool_args,
+        )
+        return ticket_id
+
+    def consume_issuance_ticket(self, *, ticket_id: str, intent: str, actor_context: dict[str, Any], tool_name: str, tool_args: dict[str, Any]) -> bool:
+        expected_fingerprint = self._issuance_tickets.pop(ticket_id, None)
+        if expected_fingerprint is None:
+            return False
+        actual_fingerprint = self._ticket_fingerprint(
+            intent=intent,
+            actor_context=actor_context,
+            tool_name=tool_name,
+            tool_args=tool_args,
+        )
+        return expected_fingerprint == actual_fingerprint
 
     def _evaluate_issuance_governance(self, intent: str, actor_context: dict[str, Any], tool_name: str, tool_args: dict[str, Any]):
         current_state = RuntimeState[str(actor_context.get("current_state", RuntimeState.RESEARCH.value))]
@@ -104,6 +144,18 @@ class _ConstitutionalAuthority:
         )
 
     def issue_governance_token(self, intent: str, actor_context: dict[str, Any], tool_name: str, tool_args: dict[str, Any]) -> str:
+        issuance_ticket = actor_context.get("governance_issuance_ticket")
+        if not isinstance(issuance_ticket, str) or not issuance_ticket:
+            raise RuntimeError("UNAUTHORIZED_EXECUTION: missing governance issuance ticket")
+        if not self.consume_issuance_ticket(
+            ticket_id=issuance_ticket,
+            intent=intent,
+            actor_context=actor_context,
+            tool_name=tool_name,
+            tool_args=tool_args,
+        ):
+            raise RuntimeError("UNAUTHORIZED_EXECUTION: invalid governance issuance ticket")
+
         governance_decision = self._evaluate_issuance_governance(intent, actor_context, tool_name, tool_args)
         if governance_decision.status == "DENY":
             reason = governance_decision.correction_requirement.required_action if governance_decision.correction_requirement else "GOVERNANCE_DENY"
@@ -275,6 +327,15 @@ def register_tool(tool_name: str, tool: Callable[[dict[str, Any]], Any]) -> None
     _ensure_default_authority().register_tool(tool_name, tool)
 
 
+def mint_issuance_ticket(intent: str, actor_context: dict, tool_name: str, tool_args: dict) -> str:
+    return _ensure_default_authority().mint_issuance_ticket(
+        intent=intent,
+        actor_context=actor_context,
+        tool_name=tool_name,
+        tool_args=tool_args,
+    )
+
+
 def issue_governance_token(intent: str, actor_context: dict, tool_name: str, tool_args: dict) -> str:
     return _ensure_default_authority().issue_governance_token(intent, actor_context, tool_name, tool_args)
 
@@ -283,4 +344,4 @@ def execute(intent: str, actor_context: dict, tool_name: str, tool_args: dict) -
     return _ensure_default_authority()._execute(intent, actor_context, tool_name, tool_args)
 
 
-__all__ = ["configure_authority", "register_tool", "issue_governance_token", "execute"]
+__all__ = ["configure_authority", "register_tool", "mint_issuance_ticket", "issue_governance_token", "execute"]
