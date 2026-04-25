@@ -23,7 +23,7 @@ This becomes a critical failure point when agents:
 - control infrastructure  
 - interact with real-world systems  
 
-Constraint Engine solves this by enforcing deterministic control before execution.
+Cognitive Firewall solves this by enforcing deterministic control before execution.
 
 ---
 
@@ -39,7 +39,7 @@ Constraint Engine solves this by enforcing deterministic control before executio
 
 ## Key Property
 
-If Constraint Engine is in the execution path:
+If Cognitive Firewall is in the execution path:
 
 → the agent cannot act without it
 
@@ -51,7 +51,7 @@ Agent intent:
 
 "Use gravitational models to optimize portfolio allocation"
 
-Constraint Engine:
+Cognitive Firewall:
 
 - detects domain mismatch (physics → finance)  
 - flags epistemic failure  
