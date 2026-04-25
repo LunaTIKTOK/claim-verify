@@ -1,51 +1,110 @@
 # Constraint-Engine
 
-Constraint-Engine is a pre-action decision engine for humans and AI agents.
+Constraint-Engine is **runtime governance infrastructure for agents**.
 
-It does not determine truth.  
-It determines whether action is justified under uncertainty — and how much to commit.
+This repository has shifted from **validator** to **governor**:
 
----
+- validator: classify/risk score outputs
+- governor: define and enforce pre-action execution boundaries
 
-## Core Idea
+## Governance pipeline
 
-Every action is a bet.
+The runtime model is:
 
-Constraint-Engine evaluates that bet before execution using three forces:
+1. **permissioning** (state + policy + identity + solvency)
+2. **execution** (governed token-bound call path)
+3. **correction** (deterministic corrective routing)
+4. **audit** (violation and economic traceability)
 
-- **Expected Value (EV)** → potential upside  
-- **Confidence** → reliability of that upside  
-- **Risk / Toxicity** → cost of being wrong  
+```mermaid
+flowchart LR
+  A[evaluate_request] --> B[issue_governance_token]
+  B --> C[execute]
+  C --> D[audit]
+```
 
-The output is not binary.
+## Runtime state governance
 
-It answers:
+Supported operation modes:
 
-- should action occur  
-- how much to allocate  
-- what the expected cost of error is  
+- `RESEARCH`
+- `DRAFTING`
+- `READ_ONLY`
+- `TRANSACTION`
+- `PRIVILEGED`
+- `HUMAN_REVIEW`
+- `QUARANTINED`
 
----
+Policies can target states and transitions and can deny or permit state movement.
 
-## What It Does
+## Constraint hierarchy
 
-For any input claim or task, the engine computes:
+Constraint levels:
 
-- structural validity  
-- truth status (heuristic)  
-- evidence strength  
-- toxicity risk  
-- reasoning contamination risk  
-- expected cost (tokens / USD)  
-- expected benefit  
-- expected value (EV)
+- `HARD` (immutable)
+- `SOFT` (override requires explicit justification)
+- `GOAL` (task/session scoped)
 
-And produces:
+Constraint packs (examples):
 
-```json
-{
-  "execution_permission": "allow_with_warning",
-  "expected_value": 0.12,
-  "risk_label": "high",
-  "recommended_allocation": 0.25
-}
+- `packs/financial_pack.json`
+- `packs/privacy_pack.json`
+- `packs/brand_pack.json`
+- `packs/system_pack.json`
+
+## Intent classes
+
+Intent classes are separated from raw tool names:
+
+- `DATA_ACCESS`
+- `DATA_EXPORT`
+- `COMMUNICATION`
+- `PAYMENT`
+- `TRADE`
+- `SYSTEM_MODIFICATION`
+- `AUTHORIZATION`
+- `UNKNOWN`
+
+## Sidecar-friendly API
+
+`governance_service.py` exposes:
+
+- `evaluate_request(...)`
+- `issue_governance_token(...)`
+- `execute(...)`
+
+Designed for future FastAPI/gRPC sidecar deployment.
+
+## Boundary API
+
+Public boundary functions in `gate.py`:
+
+```python
+configure_authority(...)
+register_tool(...)
+issue_governance_token(intent, actor_context, tool_name, tool_args)
+execute(intent, actor_context, governance_decision, tool_name, tool_args)
+```
+
+Execution is blocked unless governance decision is `ALLOW`, token is present, and token context matches intent/tool/payload.
+
+## What this proves
+
+- denied requests cannot execute.
+- execution requires governed token.
+- tokens bind intent/tool/payload.
+- state survives restart with SQLite store.
+- secret access is denied unless explicitly allowed.
+
+## Quickstart
+
+```bash
+# run full tests
+python -m unittest discover -s tests -v
+
+# run middleware demo
+python middleware_example.py
+
+# run benchmark
+python benchmark_firewall_economics.py
+```
