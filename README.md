@@ -1,110 +1,70 @@
-# Constraint-Engine
+# Constraint Engine
 
-Constraint-Engine is **runtime governance infrastructure for agents**.
+Constraint Engine is a runtime governance system for AI agents.
 
-This repository has shifted from **validator** to **governor**:
+It sits between reasoning and execution.
 
-- validator: classify/risk score outputs
-- governor: define and enforce pre-action execution boundaries
+Agents do not act directly.
 
-## Governance pipeline
+They must pass through this system first.
 
-The runtime model is:
+---
 
-1. **permissioning** (state + policy + identity + solvency)
-2. **execution** (governed token-bound call path)
-3. **correction** (deterministic corrective routing)
-4. **audit** (violation and economic traceability)
+## Why This Exists
 
-```mermaid
-flowchart LR
-  A[evaluate_request] --> B[issue_governance_token]
-  B --> C[execute]
-  C --> D[audit]
-```
+LLMs are probabilistic systems.
 
-## Runtime state governance
+They generate outputs based on likelihood, not truth.
 
-Supported operation modes:
+This becomes a critical failure point when agents:
 
-- `RESEARCH`
-- `DRAFTING`
-- `READ_ONLY`
-- `TRANSACTION`
-- `PRIVILEGED`
-- `HUMAN_REVIEW`
-- `QUARANTINED`
+- execute financial transactions  
+- call APIs  
+- control infrastructure  
+- interact with real-world systems  
 
-Policies can target states and transitions and can deny or permit state movement.
+Constraint Engine solves this by enforcing deterministic control before execution.
 
-## Constraint hierarchy
+---
 
-Constraint levels:
+## What It Does
 
-- `HARD` (immutable)
-- `SOFT` (override requires explicit justification)
-- `GOAL` (task/session scoped)
+- intercepts agent intent  
+- evaluates constraints (financial, logical, epistemic)  
+- detects domain mismatch (wrong reasoning context)  
+- blocks unsafe execution  
+- issues governance tokens for permitted actions  
 
-Constraint packs (examples):
+---
 
-- `packs/financial_pack.json`
-- `packs/privacy_pack.json`
-- `packs/brand_pack.json`
-- `packs/system_pack.json`
+## Key Property
 
-## Intent classes
+If Constraint Engine is in the execution path:
 
-Intent classes are separated from raw tool names:
+→ the agent cannot act without it
 
-- `DATA_ACCESS`
-- `DATA_EXPORT`
-- `COMMUNICATION`
-- `PAYMENT`
-- `TRADE`
-- `SYSTEM_MODIFICATION`
-- `AUTHORIZATION`
-- `UNKNOWN`
+---
 
-## Sidecar-friendly API
+## Example
 
-`governance_service.py` exposes:
+Agent intent:
 
-- `evaluate_request(...)`
-- `issue_governance_token(...)`
-- `execute(...)`
+"Use gravitational models to optimize portfolio allocation"
 
-Designed for future FastAPI/gRPC sidecar deployment.
+Constraint Engine:
 
-## Boundary API
+- detects domain mismatch (physics → finance)  
+- flags epistemic failure  
+- blocks execution  
 
-Public boundary functions in `gate.py`:
+---
 
-```python
-configure_authority(...)
-register_tool(...)
-issue_governance_token(intent, actor_context, tool_name, tool_args)
-execute(intent, actor_context, governance_decision, tool_name, tool_args)
-```
+## Positioning
 
-Execution is blocked unless governance decision is `ALLOW`, token is present, and token context matches intent/tool/payload.
+This is not an AI model.
 
-## What this proves
+This is not a safety wrapper.
 
-- denied requests cannot execute.
-- execution requires governed token.
-- tokens bind intent/tool/payload.
-- state survives restart with SQLite store.
-- secret access is denied unless explicitly allowed.
+This is:
 
-## Quickstart
-
-```bash
-# run full tests
-python -m unittest discover -s tests -v
-
-# run middleware demo
-python middleware_example.py
-
-# run benchmark
-python benchmark_firewall_economics.py
-```
+→ a control layer for agent execution
