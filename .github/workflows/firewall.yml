@@ -1,0 +1,99 @@
+name: Cognitive Firewall
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  firewall-gate:
+    runs-on: ubuntu-latest
+    outputs:
+      allow_secrets: ${{ steps.gate.outputs.allow_secrets }}
+      decision: ${{ steps.gate.outputs.decision }}
+      retry_tax_usd: ${{ steps.gate.outputs.retry_tax_usd }}
+      expected_total_cost_usd: ${{ steps.gate.outputs.expected_total_cost_usd }}
+      recommended_next_action: ${{ steps.gate.outputs.recommended_next_action }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run middleware example
+        run: python middleware_example.py
+
+      - name: Run benchmark
+        run: python benchmark_firewall_economics.py
+
+      - name: Firewall CI gate (verify_output + Firewall.submit_response)
+        id: gate
+        run: python scripts/firewall_ci_gate.py
+
+      - name: Print enforcement summary
+        run: |
+          echo "decision=${{ steps.gate.outputs.decision }}"
+          echo "retry_tax_usd=${{ steps.gate.outputs.retry_tax_usd }}"
+          echo "expected_total_cost_usd=${{ steps.gate.outputs.expected_total_cost_usd }}"
+          echo "recommended_next_action=${{ steps.gate.outputs.recommended_next_action }}"
+
+      - name: Block secret-dependent execution unless decision is ALLOW or EXECUTE_SMALL
+        if: steps.gate.outputs.allow_secrets != 'true'
+        run: |
+          echo "Secret-dependent execution blocked by policy."
+          echo "decision=${{ steps.gate.outputs.decision }}"
+          echo "recommended_next_action=${{ steps.gate.outputs.recommended_next_action }}"
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: firewall-artifacts
+          path: |
+            artifacts/benchmark_results.json
+            artifacts/benchmark_report.md
+            logs/**/*.jsonl
+          if-no-files-found: warn
+
+  meta-analysis:
+    runs-on: ubuntu-latest
+    needs: firewall-gate
+    if: always()
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: firewall-artifacts
+          path: artifacts
+
+      - name: Meta analysis
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          p = Path("artifacts/benchmark_results.json")
+          if not p.exists():
+            print("benchmark_results.json not found; skipping meta-analysis")
+            raise SystemExit(0)
+
+          data = json.loads(p.read_text(encoding="utf-8"))
+          scenarios = data.get("scenarios", [])
+          comparison = data.get("comparison", {})
+
+          avg_retry_tax = 0.0
+          if scenarios:
+            avg_retry_tax = sum(float(s.get("cumulative_retry_tax_usd", 0.0)) for s in scenarios) / len(scenarios)
+
+          failure_cost_avoided = sum(float(s.get("estimated_failure_cost_avoided_usd", 0.0)) for s in scenarios)
+          economic_advantage_ratio = comparison.get("economic_advantage_ratio", 0.0)
+
+          print(f"average_retry_tax_usd={avg_retry_tax:.6f}")
+          print(f"failure_cost_avoided_usd={failure_cost_avoided:.6f}")
+          print(f"economic_advantage_ratio={float(economic_advantage_ratio):.6f}")
+          PY

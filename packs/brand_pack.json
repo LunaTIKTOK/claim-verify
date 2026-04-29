@@ -1,0 +1,18 @@
+{
+  "pack": "brand_pack",
+  "version": 1,
+  "description": "Brand and communication guardrails",
+  "rules": [
+    {
+      "id": "BR-001",
+      "level": "SOFT",
+      "applies_in_states": ["DRAFTING", "READ_ONLY", "TRANSACTION", "PRIVILEGED"],
+      "allowed_next_states": ["READ_ONLY", "DRAFTING", "HUMAN_REVIEW"],
+      "intent_classes": ["COMMUNICATION"],
+      "violation_type": "REQUIRE_HUMAN_APPROVAL",
+      "required_action": "REQUIRE_HUMAN_APPROVAL",
+      "required_fields": ["override_justification"],
+      "human_review_required": true
+    }
+  ]
+}
