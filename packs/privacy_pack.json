@@ -1,0 +1,29 @@
+{
+  "pack": "privacy_pack",
+  "version": 1,
+  "description": "Privacy and PII governance rules",
+  "rules": [
+    {
+      "id": "PRIV-001",
+      "level": "HARD",
+      "applies_in_states": ["READ_ONLY", "DRAFTING", "TRANSACTION", "PRIVILEGED"],
+      "allowed_next_states": ["READ_ONLY", "HUMAN_REVIEW"],
+      "intent_classes": ["DATA_EXPORT"],
+      "violation_type": "REDACT_PII",
+      "required_action": "REDACT_PII",
+      "required_fields": ["redaction_proof"],
+      "human_review_required": false
+    },
+    {
+      "id": "PRIV-002",
+      "level": "SOFT",
+      "applies_in_states": ["READ_ONLY", "DRAFTING", "TRANSACTION", "PRIVILEGED"],
+      "allowed_next_states": ["READ_ONLY", "HUMAN_REVIEW", "DRAFTING"],
+      "intent_classes": ["DATA_ACCESS", "DATA_EXPORT"],
+      "violation_type": "RETRY_WITH_SOURCE",
+      "required_action": "RETRY_WITH_SOURCE",
+      "required_fields": ["source_reference"],
+      "human_review_required": false
+    }
+  ]
+}

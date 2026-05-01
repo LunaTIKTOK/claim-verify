@@ -1,0 +1,29 @@
+{
+  "pack": "financial_pack",
+  "version": 1,
+  "description": "Financial transaction governance rules",
+  "rules": [
+    {
+      "id": "FIN-001",
+      "level": "HARD",
+      "applies_in_states": ["TRANSACTION", "PRIVILEGED"],
+      "allowed_next_states": ["TRANSACTION", "PRIVILEGED", "HUMAN_REVIEW"],
+      "intent_classes": ["PAYMENT", "TRADE"],
+      "violation_type": "FETCH_APPROVAL_TOKEN",
+      "required_action": "FETCH_APPROVAL_TOKEN",
+      "required_fields": ["approval_token"],
+      "human_review_required": false
+    },
+    {
+      "id": "FIN-002",
+      "level": "SOFT",
+      "applies_in_states": ["TRANSACTION", "PRIVILEGED"],
+      "allowed_next_states": ["READ_ONLY", "HUMAN_REVIEW", "TRANSACTION"],
+      "intent_classes": ["PAYMENT", "TRADE"],
+      "violation_type": "SPLIT_ORDER_SIZE",
+      "required_action": "SPLIT_ORDER_SIZE",
+      "required_fields": ["order_size", "risk_limit"],
+      "human_review_required": false
+    }
+  ]
+}

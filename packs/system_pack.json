@@ -1,0 +1,29 @@
+{
+  "pack": "system_pack",
+  "version": 1,
+  "description": "System integrity governance rules",
+  "rules": [
+    {
+      "id": "SYS-001",
+      "level": "HARD",
+      "applies_in_states": ["RESEARCH", "DRAFTING", "READ_ONLY", "TRANSACTION", "PRIVILEGED", "HUMAN_REVIEW", "QUARANTINED"],
+      "allowed_next_states": ["PRIVILEGED", "HUMAN_REVIEW"],
+      "intent_classes": ["SYSTEM_MODIFICATION", "AUTHORIZATION"],
+      "violation_type": "FETCH_APPROVAL_TOKEN",
+      "required_action": "FETCH_APPROVAL_TOKEN",
+      "required_fields": ["approval_token"],
+      "human_review_required": true
+    },
+    {
+      "id": "SYS-002",
+      "level": "GOAL",
+      "applies_in_states": ["RESEARCH", "DRAFTING", "READ_ONLY", "TRANSACTION", "PRIVILEGED"],
+      "allowed_next_states": ["READ_ONLY", "DRAFTING", "HUMAN_REVIEW"],
+      "intent_classes": ["UNKNOWN"],
+      "violation_type": "RETRY_WITH_SOURCE",
+      "required_action": "RETRY_WITH_SOURCE",
+      "required_fields": ["source_reference"],
+      "human_review_required": false
+    }
+  ]
+}
