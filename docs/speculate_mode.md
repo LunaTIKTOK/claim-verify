@@ -6,6 +6,8 @@
 - `SPECULATE`: forward-looking thesis has uncertainty; execution is allowed only with bounded allocation.
 - `BLOCK`: uncertainty or governance constraints fail; no execution.
 
+Cognitive-firewall does not eliminate speculation. It prevents speculation from pretending to be verified knowledge.
+
 ## Assumption maps
 
 SPECULATE mode uses structured assumption maps:
@@ -46,3 +48,5 @@ Each assumption can carry a falsification trigger. These triggers are emitted in
 ## Why speculation is allowed but bounded
 
 Forward-looking work (investing, capacity planning, scenario strategy) often cannot be fully verified in advance. Cognitive-firewall allows this work only in bounded form: explicit assumptions, explicit confidence, hard caps, and normal token-governed execution controls.
+
+In short: speculation is allowed only when bounded.

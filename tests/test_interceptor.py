@@ -201,6 +201,31 @@ class InterceptorTests(unittest.TestCase):
         self.assertTrue(out["executed"])
         self.assertEqual(internal_exec_mock.call_count, 1)
 
+    def test_simulation_allocation_above_cap_blocks_before_token_issuance(self):
+        ctx = self._ctx()
+        ctx["allow_secrets"] = True
+        with patch("interceptor.issue_governance_token") as issue_mock:
+            out = intercept_and_execute(
+                {
+                    "intent": "invest",
+                    "intent_text": "thesis",
+                    "tool_name": "tool.scan",
+                    "tool_args": {"claim": "thesis", "requested_allocation_pct": 3.0},
+                    "domain": "energy",
+                    "run_simulation": True,
+                    "simulation_count": 300,
+                    "assumptions": [
+                        {"assumption": "a", "status": "OBSERVABLE", "confidence": 0.75, "evidence": ["signal"], "falsification_trigger": "x", "critical": True, "low": 0.6, "base": 0.72, "high": 0.9, "weight": 1.0},
+                    ],
+                    "confidence_average": 0.75,
+                },
+                ctx,
+            )
+        self.assertEqual(out["decision"], "BLOCK")
+        self.assertEqual(out["reason"], "SIMULATION_ALLOCATION_EXCEEDS_CAP")
+        self.assertIn("simulation", out)
+        issue_mock.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

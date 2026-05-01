@@ -5,6 +5,7 @@ from typing import Any
 from gate import execute_authorized_from_interceptor, requires_secrets
 from governance_service import evaluate_request, issue_governance_token
 from runtime_governance import RuntimeState
+from simulation_governance import ScenarioAssumption, run_scenario_simulation
 from uncertainty_governance import Assumption, AssumptionMap, evaluate_uncertainty
 
 
@@ -39,6 +40,7 @@ def intercept_and_execute(intent: dict, actor_context: dict) -> dict[str, Any]:
     confidence_average = None
     max_allocation_pct = None
     falsification_triggers = []
+    simulation_output = None
 
     violations = detect_domain_mismatch(intent_text, domain)
     if violations:
@@ -109,6 +111,53 @@ def intercept_and_execute(intent: dict, actor_context: dict) -> dict[str, Any]:
         confidence_average = uncertainty["confidence_average"]
         max_allocation_pct = uncertainty["max_allocation_pct"]
         falsification_triggers = list(uncertainty["falsification_triggers"])
+        if bool(intent.get("run_simulation", False)):
+            requested_allocation_pct = intent.get("requested_allocation_pct", tool_args.get("requested_allocation_pct"))
+            simulation_assumptions = [
+                ScenarioAssumption(
+                    name=str(item.get("assumption") or item.get("name") or ""),
+                    low=float(item.get("low", max(0.0, float(item.get("confidence", 0.0)) - 0.25))),
+                    base=float(item.get("base", item.get("confidence", 0.0))),
+                    high=float(item.get("high", min(1.0, float(item.get("confidence", 0.0)) + 0.25))),
+                    weight=float(item.get("weight", 1.0)),
+                    critical=bool(item.get("critical", False)),
+                )
+                for item in assumptions_raw
+            ]
+            simulation_output = run_scenario_simulation(
+                claim=claim,
+                assumptions=simulation_assumptions,
+                simulation_count=int(intent.get("simulation_count", 1000)),
+                seed=int(intent.get("simulation_seed", 42)),
+            )
+            if simulation_output["decision"] == "BLOCK":
+                return {
+                    "decision": "BLOCK",
+                    "executed": False,
+                    "reason": str(simulation_output.get("reason") or "SIMULATION_BLOCKED"),
+                    "violations": None,
+                    "epistemic_status": "UNSTABLE",
+                    "speculative": True,
+                    "max_allocation_pct": simulation_output["max_allocation_pct"],
+                    "confidence_average": confidence_average,
+                    "falsification_triggers": simulation_output["falsification_triggers"],
+                    "simulation": {k: simulation_output[k] for k in ["simulation_count", "thesis_survival_rate", "sensitivity", "fragile_assumptions", "max_allocation_pct", "falsification_triggers"]},
+                }
+            if requested_allocation_pct is None or float(requested_allocation_pct) > min(float(max_allocation_pct), float(simulation_output["max_allocation_pct"])):
+                return {
+                    "decision": "BLOCK",
+                    "executed": False,
+                    "reason": "SIMULATION_ALLOCATION_EXCEEDS_CAP",
+                    "violations": None,
+                    "epistemic_status": "UNSTABLE",
+                    "speculative": True,
+                    "max_allocation_pct": simulation_output["max_allocation_pct"],
+                    "confidence_average": confidence_average,
+                    "falsification_triggers": simulation_output["falsification_triggers"],
+                    "simulation": {k: simulation_output[k] for k in ["simulation_count", "thesis_survival_rate", "sensitivity", "fragile_assumptions", "max_allocation_pct", "falsification_triggers"]},
+                }
+            max_allocation_pct = min(float(max_allocation_pct), float(simulation_output["max_allocation_pct"]))
+            falsification_triggers = list(simulation_output["falsification_triggers"])
 
     current_state = RuntimeState[str(actor_context.get("current_state", RuntimeState.RESEARCH.value))]
     requested_next_state = RuntimeState[str(actor_context.get("requested_next_state", RuntimeState.READ_ONLY.value))]
@@ -154,7 +203,7 @@ def intercept_and_execute(intent: dict, actor_context: dict) -> dict[str, Any]:
             "confidence_average": confidence_average,
             "falsification_triggers": falsification_triggers,
         }
-    return {
+    response = {
         "decision": "SPECULATE" if speculative else "ALLOW",
         "executed": bool(result.get("executed", False)),
         "reason": None,
@@ -165,3 +214,6 @@ def intercept_and_execute(intent: dict, actor_context: dict) -> dict[str, Any]:
         "confidence_average": confidence_average,
         "falsification_triggers": falsification_triggers,
     }
+    if simulation_output is not None:
+        response["simulation"] = {k: simulation_output[k] for k in ["simulation_count", "thesis_survival_rate", "sensitivity", "fragile_assumptions", "max_allocation_pct", "falsification_triggers"]}
+    return response

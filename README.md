@@ -2,6 +2,10 @@
 
 Constraint-Engine is **runtime governance infrastructure for agents**.
 
+## 30-second explanation
+
+Cognitive-firewall is runtime governance middleware for consequential agent actions. It is not a generic prompt filter. It routes intent through deterministic domain checks, uncertainty bounds, governance policy/state checks, token issuance, and authorized execution with audit receipts.
+
 This repository has shifted from **validator** to **governor**:
 
 - validator: classify/risk score outputs
@@ -35,6 +39,12 @@ flowchart LR
   F --> G[internal authorized execution]
   G --> H[audit]
 ```
+
+See also:
+
+- [Threat model](docs/threat_model.md)
+- [SPECULATE mode](docs/speculate_mode.md)
+- [Architecture](docs/architecture.md)
 
 ## Runtime state governance
 
@@ -127,6 +137,12 @@ Cognitive-firewall does not eliminate speculation. It prevents speculation from 
 
 For speculative decisions, unsupported critical assumptions are blocked and requested allocation must remain under confidence-derived caps before governance token issuance.
 
+## Simulation-Governed Speculation
+
+Simulation does not verify the future. It tests whether a thesis survives across plausible futures.
+
+When `run_simulation=true`, simulation is evaluated before token issuance. Simulation can support `SPECULATE` with a cap, or return `BLOCK`; it never upgrades uncertainty into automatic `ALLOW`.
+
 ## Quickstart
 
 ```bash
@@ -142,6 +158,9 @@ python demo_domain_mismatch.py
 
 # run speculative mode demo
 python demo_speculative_mode.py
+
+# run simulation speculation demo
+python demo_simulation_speculation.py
 
 # run middleware demo
 python middleware_example.py
