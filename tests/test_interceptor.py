@@ -1,6 +1,9 @@
 import unittest
+from unittest.mock import patch
 
-from gate import KeyRing, PaymentGate, configure_authority, execute, issue_governance_token, mint_issuance_ticket, register_tool
+from gate import KeyRing, PaymentGate, configure_authority, execute, register_tool
+from governance_service import execute as governance_execute
+import interceptor as interceptor_module
 from interceptor import intercept_and_execute
 
 
@@ -70,7 +73,7 @@ class InterceptorTests(unittest.TestCase):
         self.assertEqual(out["decision"], "BLOCK")
         self.assertFalse(out["executed"])
 
-    def test_allow_path_executes(self):
+    def test_interceptor_allowed_path_executes_registered_tool_once(self):
         ctx = self._ctx()
         ctx["allow_secrets"] = True
         out = intercept_and_execute(
@@ -87,16 +90,57 @@ class InterceptorTests(unittest.TestCase):
         self.assertTrue(out["executed"])
         self.assertEqual(self.calls["n"], 1)
 
-    def test_execution_requires_interceptor(self):
-        payload = {"claim": "safe"}
-        ctx = self._ctx()
-        ctx["allow_secrets"] = True
-        ctx["governance_issuance_ticket"] = mint_issuance_ticket("query_customer_data", ctx, "tool.scan", payload)
-        issuance = issue_governance_token("query_customer_data", ctx, "tool.scan", payload)
-        direct = execute("query_customer_data", ctx, issuance, "tool.scan", payload)
+    def test_direct_gate_execute_returns_block(self):
+        direct = execute("query_customer_data", self._ctx(), {"decision": "ALLOW"}, "tool.scan", {"claim": "safe"})
         self.assertEqual(direct["decision"], "BLOCK")
         self.assertEqual(direct["reason"], "intercept_and_execute required")
 
+    def test_governance_service_execute_does_not_bypass_interceptor(self):
+        blocked = governance_execute("query_customer_data", self._ctx(), {"decision": "ALLOW"}, "tool.scan", {"claim": "safe"})
+        self.assertEqual(blocked["decision"], "BLOCK")
+        self.assertEqual(blocked["reason"], "intercept_and_execute required")
+
+    def test_domain_mismatch_blocks_before_token_issuance(self):
+        ctx = self._ctx()
+        ctx["allow_secrets"] = True
+        with patch("interceptor.evaluate_request") as evaluate_mock, patch("interceptor.issue_governance_token") as issue_mock:
+            out = intercept_and_execute(
+                {
+                    "intent": "query_customer_data",
+                    "intent_text": "gravitational model for portfolio",
+                    "tool_name": "tool.scan",
+                    "tool_args": {"claim": "safe"},
+                    "domain": "finance",
+                },
+                ctx,
+            )
+        self.assertEqual(out["decision"], "BLOCK")
+        self.assertEqual(out["reason"], "DOMAIN_MISMATCH")
+        evaluate_mock.assert_not_called()
+        issue_mock.assert_not_called()
+        self.assertNotIn("governance_issuance_ticket", ctx)
+
+    def test_interceptor_does_not_call_public_blocked_execute(self):
+        ctx = self._ctx()
+        ctx["allow_secrets"] = True
+        with patch("interceptor.execute_authorized_from_interceptor", wraps=interceptor_module.execute_authorized_from_interceptor) as internal_exec_mock:
+            out = intercept_and_execute(
+                {
+                    "intent": "query_customer_data",
+                    "intent_text": "safe claim",
+                    "tool_name": "tool.scan",
+                    "tool_args": {"claim": "safe"},
+                    "domain": "finance",
+                },
+                ctx,
+            )
+        self.assertEqual(out["decision"], "ALLOW")
+        self.assertTrue(out["executed"])
+        self.assertEqual(self.calls["n"], 1)
+        self.assertEqual(internal_exec_mock.call_count, 1)
+
+    def test_execution_requires_interceptor(self):
+        payload = {"claim": "safe"}
         out = intercept_and_execute(
             {
                 "intent": "query_customer_data",
@@ -109,6 +153,53 @@ class InterceptorTests(unittest.TestCase):
         )
         self.assertEqual(out["decision"], "ALLOW")
         self.assertTrue(out["executed"])
+
+    def test_speculative_allocation_above_cap_blocks_before_token_issuance(self):
+        ctx = self._ctx()
+        ctx["allow_secrets"] = True
+        with patch("interceptor.issue_governance_token") as issue_mock:
+            out = intercept_and_execute(
+                {
+                    "intent": "invest",
+                    "intent_text": "thesis",
+                    "tool_name": "tool.scan",
+                    "tool_args": {"claim": "thesis", "requested_allocation_pct": 3.0},
+                    "domain": "finance",
+                    "assumptions": [
+                        {"assumption": "a", "status": "OBSERVABLE", "confidence": 0.7, "evidence": ["signal"], "falsification_trigger": "x", "critical": True},
+                        {"assumption": "b", "status": "SPECULATIVE", "confidence": 0.6, "evidence": ["signal"], "falsification_trigger": "y", "critical": False},
+                    ],
+                    "confidence_average": 0.65,
+                },
+                ctx,
+            )
+        self.assertEqual(out["decision"], "BLOCK")
+        self.assertEqual(out["reason"], "SPECULATIVE_ALLOCATION_EXCEEDS_CAP")
+        issue_mock.assert_not_called()
+
+    def test_speculative_allocation_within_cap_executes_through_interceptor(self):
+        ctx = self._ctx()
+        ctx["allow_secrets"] = True
+        with patch("interceptor.execute_authorized_from_interceptor", wraps=interceptor_module.execute_authorized_from_interceptor) as internal_exec_mock:
+            out = intercept_and_execute(
+                {
+                    "intent": "invest",
+                    "intent_text": "thesis",
+                    "tool_name": "tool.scan",
+                    "tool_args": {"claim": "thesis", "requested_allocation_pct": 1.5},
+                    "domain": "finance",
+                    "assumptions": [
+                        {"assumption": "a", "status": "OBSERVABLE", "confidence": 0.7, "evidence": ["signal"], "falsification_trigger": "x", "critical": True},
+                        {"assumption": "b", "status": "SPECULATIVE", "confidence": 0.6, "evidence": ["signal"], "falsification_trigger": "y", "critical": False},
+                    ],
+                    "confidence_average": 0.65,
+                },
+                ctx,
+            )
+        self.assertEqual(out["decision"], "SPECULATE")
+        self.assertTrue(out["speculative"])
+        self.assertTrue(out["executed"])
+        self.assertEqual(internal_exec_mock.call_count, 1)
 
 
 if __name__ == "__main__":

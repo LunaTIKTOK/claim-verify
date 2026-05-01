@@ -11,11 +11,12 @@ from gate import (
     PaymentGate,
     SQLiteGovernanceStateStore,
     configure_authority,
+    execute_authorized_from_interceptor,
     issue_governance_token as gate_issue_governance_token,
     mint_issuance_ticket,
     register_tool,
 )
-from governance_service import evaluate_request, execute, issue_governance_token
+from governance_service import evaluate_request, issue_governance_token
 from mcp_executor import SecurityViolationError
 from runtime_governance import Constraint, RuntimeState, evaluate_runtime_governance
 
@@ -208,11 +209,11 @@ class RuntimeGovernanceTests(unittest.TestCase):
         issuance = issue_governance_token("query_customer_data", actor_context, "tool.scan", tool_args)
         self.assertEqual(issuance["decision"], "ALLOW")
         self.assertIsNotNone(issuance["token"])
-        result = execute("query_customer_data", actor_context, issuance, "tool.scan", tool_args)
+        result = execute_authorized_from_interceptor("query_customer_data", actor_context, issuance, "tool.scan", tool_args)
         self.assertTrue(result["executed"])
         self.assertEqual(self.calls["n"], 1)
 
-    def test_denied_cannot_issue_token_or_execute(self):
+    def test_denied_cannot_issue_token_or_execute_authorized_from_interceptor(self):
         actor_context = self._actor_context()
         actor_context["approval_token"] = ""
         actor_context["current_state"] = RuntimeState.TRANSACTION.value
@@ -232,7 +233,7 @@ class RuntimeGovernanceTests(unittest.TestCase):
         self.assertEqual(issuance["decision"], "BLOCK")
         self.assertIsNone(issuance["token"])
 
-        blocked = execute("payment_transfer", actor_context, issuance, "tool.scan", tool_args)
+        blocked = execute_authorized_from_interceptor("payment_transfer", actor_context, issuance, "tool.scan", tool_args)
         self.assertEqual(blocked["decision"], "BLOCK")
         self.assertFalse(blocked["executed"])
         self.assertEqual(self.calls["n"], 0)
@@ -278,7 +279,7 @@ class RuntimeGovernanceTests(unittest.TestCase):
         actor_context["allow_secrets"] = False
         issuance["allow_secrets"] = False
 
-        out = execute("query_customer_data", actor_context, issuance, "tool.secret.fetch", tool_args)
+        out = execute_authorized_from_interceptor("query_customer_data", actor_context, issuance, "tool.secret.fetch", tool_args)
         self.assertEqual(out["decision"], "BLOCK")
         self.assertFalse(out["executed"])
 
@@ -319,7 +320,7 @@ class RuntimeGovernanceTests(unittest.TestCase):
             requested_next_state=RuntimeState.READ_ONLY,
         )
         issuance = issue_governance_token("query_customer_data", actor_context, "tool.scan", tool_args)
-        blocked = execute("query_customer_data", actor_context, issuance, "tool.secret.fetch", tool_args)
+        blocked = execute_authorized_from_interceptor("query_customer_data", actor_context, issuance, "tool.secret.fetch", tool_args)
         self.assertEqual(blocked["decision"], "BLOCK")
         self.assertFalse(blocked["executed"])
 
@@ -338,7 +339,7 @@ class RuntimeGovernanceTests(unittest.TestCase):
             requested_next_state=RuntimeState.READ_ONLY,
         )
         issuance = issue_governance_token("query_customer_data", actor_context, "tool.scan", tool_args)
-        blocked = execute("query_customer_data", actor_context, issuance, "tool.scan", tampered_args)
+        blocked = execute_authorized_from_interceptor("query_customer_data", actor_context, issuance, "tool.scan", tampered_args)
         self.assertEqual(blocked["decision"], "BLOCK")
         self.assertFalse(blocked["executed"])
 
@@ -357,7 +358,7 @@ class RuntimeGovernanceTests(unittest.TestCase):
 
     def test_execution_without_governance_decision_blocks(self):
         actor_context = self._actor_context()
-        blocked = execute("query_customer_data", actor_context, None, "tool.scan", {"claim": "safe"})
+        blocked = execute_authorized_from_interceptor("query_customer_data", actor_context, None, "tool.scan", {"claim": "safe"})
         self.assertEqual(blocked["decision"], "BLOCK")
         self.assertFalse(blocked["executed"])
 
@@ -375,7 +376,7 @@ class RuntimeGovernanceTests(unittest.TestCase):
         issuance = issue_governance_token("query_customer_data", actor_context, "tool.scan", tool_args)
         bad_context = dict(actor_context)
         bad_context.pop("agent_id", None)
-        blocked = execute("query_customer_data", bad_context, issuance, "tool.scan", tool_args)
+        blocked = execute_authorized_from_interceptor("query_customer_data", bad_context, issuance, "tool.scan", tool_args)
         self.assertEqual(blocked["decision"], "BLOCK")
         self.assertEqual(blocked["reason"], "invalid actor identity")
 
@@ -392,7 +393,7 @@ class RuntimeGovernanceTests(unittest.TestCase):
         )
         issuance = issue_governance_token("query_customer_data", actor_context, "tool.scan", tool_args)
         with patch("gate.decide_policy", return_value="DENY"):
-            blocked = execute("query_customer_data", actor_context, issuance, "tool.scan", tool_args)
+            blocked = execute_authorized_from_interceptor("query_customer_data", actor_context, issuance, "tool.scan", tool_args)
         self.assertEqual(blocked["decision"], "BLOCK")
         self.assertEqual(blocked["reason"], "policy denied execution")
 
@@ -413,7 +414,7 @@ class RuntimeGovernanceTests(unittest.TestCase):
             requested_next_state=RuntimeState.READ_ONLY,
         )
         issuance = issue_governance_token("query_customer_data", actor_context, "tool.scan", tool_args)
-        blocked = execute("query_customer_data", actor_context, issuance, "tool.scan", tool_args)
+        blocked = execute_authorized_from_interceptor("query_customer_data", actor_context, issuance, "tool.scan", tool_args)
         self.assertEqual(blocked["decision"], "BLOCK")
         self.assertEqual(blocked["reason"], "insufficient solvency for governance bond")
 
@@ -438,7 +439,7 @@ class RuntimeGovernanceTests(unittest.TestCase):
             requested_next_state=RuntimeState.READ_ONLY,
         )
         issuance = issue_governance_token("query_customer_data", actor_context, "tool.scan", tool_args)
-        blocked = execute("query_customer_data", actor_context, issuance, "tool.scan", tool_args)
+        blocked = execute_authorized_from_interceptor("query_customer_data", actor_context, issuance, "tool.scan", tool_args)
         self.assertEqual(blocked["decision"], "BLOCK")
         self.assertEqual(blocked["reason"], "failed to lock governance bond")
 
@@ -457,7 +458,7 @@ class RuntimeGovernanceTests(unittest.TestCase):
         register_tool("tool.scan", lambda args: {"ok": True, "args": args})
         actor_context["governance_issuance_ticket"] = mint_issuance_ticket("query_customer_data", actor_context, "tool.scan", tool_args)
         issuance = gate_issue_governance_token("query_customer_data", actor_context, "tool.scan", tool_args)
-        execute("query_customer_data", actor_context, issuance, "tool.scan", tool_args)
+        execute_authorized_from_interceptor("query_customer_data", actor_context, issuance, "tool.scan", tool_args)
 
         configure_authority(
             key_ring=KeyRing(active_key_id=self.key_id, keys={self.key_id: self.secret}),
@@ -484,7 +485,7 @@ class RuntimeGovernanceTests(unittest.TestCase):
         register_tool("tool.scan", lambda args: {"ok": True, "args": args})
         actor_context["governance_issuance_ticket"] = mint_issuance_ticket("query_customer_data", actor_context, "tool.scan", tool_args)
         issuance = gate_issue_governance_token("query_customer_data", actor_context, "tool.scan", tool_args)
-        execute("query_customer_data", actor_context, issuance, "tool.scan", tool_args)
+        execute_authorized_from_interceptor("query_customer_data", actor_context, issuance, "tool.scan", tool_args)
 
         rows = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines() if line.strip()]
         self.assertTrue(any(row.get("correlation_id") == "cid-runtime-1" for row in rows))

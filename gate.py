@@ -679,7 +679,7 @@ def issue_governance_token(intent: str, actor_context: dict, tool_name: str, too
     return _ensure_default_authority().issue_governance_token(intent, actor_context, tool_name, tool_args)
 
 
-def _execute_via_interceptor(
+def execute_authorized_from_interceptor(
     intent: str,
     actor_context: dict,
     governance_decision: dict[str, Any],
@@ -710,6 +710,7 @@ __all__ = [
     "register_tool",
     "mint_issuance_ticket",
     "issue_governance_token",
+    "execute_authorized_from_interceptor",
     "execute",
     "InMemoryGovernanceStateStore",
     "SQLiteGovernanceStateStore",

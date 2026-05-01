@@ -3,7 +3,6 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from gate import _execute_via_interceptor
 from gate import issue_governance_token as _issue_governance_token
 from gate import mint_issuance_ticket
 from intent_classification import classify_intent
@@ -71,4 +70,16 @@ def issue_governance_token(intent: str, actor_context: dict, tool_name: str, too
 
 
 def execute(intent: str, actor_context: dict, governance_decision: dict[str, Any], tool_name: str, tool_args: dict):
-    return _execute_via_interceptor(intent, actor_context, governance_decision, tool_name, tool_args)
+    return {
+        "decision": "BLOCK",
+        "allow_secrets": False,
+        "token": None,
+        "verification": None,
+        "toxic_cost": None,
+        "constraints": [],
+        "executed": False,
+        "result": None,
+        "reason": "intercept_and_execute required",
+        "next_state": str(actor_context.get("current_state", "RESEARCH")),
+        "correlation_id": str(actor_context.get("correlation_id", "")),
+    }

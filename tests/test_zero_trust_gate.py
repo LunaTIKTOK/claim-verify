@@ -5,7 +5,7 @@ from pathlib import Path
 
 from audit import ALLOWED_CODES, AuditLogger
 from authority import InMemoryUsedTokenStore, build_token, compute_payload_hash, serialize_token
-from gate import KeyRing, _GlassWingCore, configure_authority, execute, issue_governance_token, mint_issuance_ticket, register_tool
+from gate import KeyRing, _GlassWingCore, configure_authority, execute_authorized_from_interceptor, issue_governance_token, mint_issuance_ticket, register_tool
 from mcp_executor import PaymentGate, SecurityViolationError
 
 
@@ -63,7 +63,7 @@ class Stage3GovernanceTests(unittest.TestCase):
         payload = {"claim": "System has measurable 99% uptime in 30 days."}
         ctx = self._context(None)
         issuance = self._issue_token(self.tool_name, payload, ctx)
-        out = execute(self.intent, ctx, issuance, self.tool_name, payload)
+        out = execute_authorized_from_interceptor(self.intent, ctx, issuance, self.tool_name, payload)
         self.assertTrue(out["executed"])
 
     def test_token_must_be_issued_before_execution(self):
@@ -80,13 +80,13 @@ class Stage3GovernanceTests(unittest.TestCase):
             )
         )
         with self.assertRaises(SecurityViolationError):
-            execute(self.intent, self._context(raw_token), {"decision": "ALLOW", "allow_secrets": True, "token": raw_token, "reason": None, "next_state": "READ_ONLY"}, self.tool_name, payload)
+            execute_authorized_from_interceptor(self.intent, self._context(raw_token), {"decision": "ALLOW", "allow_secrets": True, "token": raw_token, "reason": None, "next_state": "READ_ONLY"}, self.tool_name, payload)
 
     def test_payload_binding_denial(self):
         token_payload = {"claim": "safe"}
         tampered_payload = {"claim": "tampered"}
         issuance = self._issue_token(self.tool_name, token_payload)
-        blocked = execute(self.intent, self._context(None), issuance, self.tool_name, tampered_payload)
+        blocked = execute_authorized_from_interceptor(self.intent, self._context(None), issuance, self.tool_name, tampered_payload)
         self.assertEqual(blocked["decision"], "BLOCK")
 
     def test_revoked_token_cannot_be_reused(self):
@@ -97,9 +97,9 @@ class Stage3GovernanceTests(unittest.TestCase):
         payload = {"claim": "safe"}
         issuance = self._issue_token("tool.fail", payload)
         with self.assertRaises(RuntimeError):
-            execute(self.intent, self._context(None), issuance, "tool.fail", payload)
+            execute_authorized_from_interceptor(self.intent, self._context(None), issuance, "tool.fail", payload)
         with self.assertRaises(SecurityViolationError):
-            execute(self.intent, self._context(None), issuance, "tool.fail", payload)
+            execute_authorized_from_interceptor(self.intent, self._context(None), issuance, "tool.fail", payload)
 
     def test_pending_token_cannot_be_reused_concurrently(self):
         payload = {"claim": "safe"}
@@ -109,7 +109,7 @@ class Stage3GovernanceTests(unittest.TestCase):
         token_obj = deserialize_token(str(issuance["token"]))
         self.assertTrue(self.token_store.mark_pending(token_obj.token_id))
         with self.assertRaises(SecurityViolationError):
-            execute(self.intent, self._context(None), issuance, self.tool_name, payload)
+            execute_authorized_from_interceptor(self.intent, self._context(None), issuance, self.tool_name, payload)
 
     def test_direct_core_access_failure(self):
         with self.assertRaises(RuntimeError):
