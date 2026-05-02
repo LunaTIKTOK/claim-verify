@@ -1,4 +1,4 @@
-# Constraint-Engine
+# Cognitive Firewall
 
 Constraint-Engine is **runtime governance infrastructure for agents**.
 
